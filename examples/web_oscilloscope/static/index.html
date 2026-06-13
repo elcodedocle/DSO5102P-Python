@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>High-Performance Hantek DSO5102P Oscilloscope Viewer</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Control Header -->
+        <header class="app-header">
+            <div class="logo">
+                <span class="logo-text">Hantek</span> DSO5102P Streamer
+            </div>
+            
+            <div class="controls-row">
+                <div class="control-group">
+                    <label>Mode:</label>
+                    <select id="mode-selector">
+                        <option value="playback">Playback Mode</option>
+                        <option value="realtime">Real-time Mode</option>
+                    </select>
+                </div>
+                
+                <div class="control-group" id="file-select-group">
+                    <input type="file" id="local-file-input" accept=".csv" style="display: none;">
+                    <button id="local-file-btn" class="btn btn-blue">Load Local CSV</button>
+                    <span id="selected-file-name" style="font-size: 13px; color: #888888; font-family: monospace;">No file loaded</span>
+                </div>
+
+                <div class="control-group buttons">
+                    <button id="record-btn" class="btn btn-green hide">Start Recording</button>
+                    <button id="freeze-btn" class="btn btn-blue hide">Freeze Display</button>
+                    <button id="playback-play-btn" class="btn btn-green">Play</button>
+                    <button id="autocal-btn" class="btn btn-blue">Auto Calibrate</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Workspace -->
+        <main class="app-main">
+            <!-- Simulated CRT screen -->
+            <div class="screen-container">
+                <canvas id="oscilloscope-canvas"></canvas>
+                
+                <!-- On-Screen Display (OSD) overlay -->
+                <div id="osd-overlay" class="osd-overlay">
+                    <div class="osd-col left">
+                        <div>CH1 Scale: <span id="osd-voltbase">--</span>/div</div>
+                        <div>Offset: <span id="osd-offset">--</span> V</div>
+                    </div>
+                    <div class="osd-col right">
+                        <div>Timebase: <span id="osd-timebase">--</span>/div</div>
+                        <div>Samples: <span id="osd-size">0</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Calibration Panel -->
+            <aside class="controls-sidebar">
+                <div class="section-title">HORIZONTAL (X-AXIS)</div>
+                <div class="calibration-section">
+                    <div class="knob-control">
+                        <label>Timebase (s/div)</label>
+                        <div class="input-row">
+                            <button id="time-zoom-out" class="step-btn">-</button>
+                            <span id="timebase-val" class="value-display">--</span>
+                            <button id="time-zoom-in" class="step-btn">+</button>
+                        </div>
+                    </div>
+                    <div class="knob-control">
+                        <label>Position (Scroll)</label>
+                        <input type="range" id="time-scroll" class="slider" min="0" max="100" value="0">
+                        <div class="scroll-vals">
+                            <span>Start</span>
+                            <span id="scroll-val">0.00E00 s</span>
+                            <span>End</span>
+                        </div>
+                    </div>
+                    <div class="knob-control" id="speed-control-group">
+                        <label>Playback Speed</label>
+                        <input type="range" id="playback-speed" class="slider" min="1" max="100" value="10">
+                        <div class="scroll-vals">
+                            <span>0.1x</span>
+                            <span id="speed-val">1.0x</span>
+                            <span>10.0x</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section-title">VERTICAL (Y-AXIS)</div>
+                <div class="calibration-section">
+                    <div class="knob-control">
+                        <label>Voltbase (V/div)</label>
+                        <div class="input-row">
+                            <button id="volt-zoom-out" class="step-btn">-</button>
+                            <span id="voltbase-val" class="value-display">--</span>
+                            <button id="volt-zoom-in" class="step-btn">+</button>
+                        </div>
+                    </div>
+                    <div class="knob-control">
+                        <label>Position (Offset)</label>
+                        <input type="range" id="volt-offset" class="slider" min="-125" max="125" value="0">
+                        <div class="offset-vals">
+                            <span>-5 div</span>
+                            <span id="offset-val">0.000 V</span>
+                            <span>+5 div</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section-title">STATUS INFO</div>
+                <div class="status-panel">
+                    <div>Status: <span id="status-text" class="status-ok">Idle</span></div>
+                    <div>Source: <span id="source-text">No File</span></div>
+                    <div>Captured: <span id="captured-count">0</span> points</div>
+                </div>
+            </aside>
+        </main>
+    </div>
+    
+    <a id="download-link" style="display: none;"></a>
+    <script src="/static/app.js"></script>
+</body>
+</html>
