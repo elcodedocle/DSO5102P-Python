@@ -2,8 +2,8 @@
  Access to the Hantek DSO5102P oscilloscope from Python 3.x
 
 See this sites for details:
-* https://elinux.org/Das_Oszi_Protocol
-* https://randomprojects.org/wiki/Voltcraft_DSO-3062C
+* https://web.archive.org/web/20241012215844/https://elinux.org/Das_Oszi_Protocol
+* https://web.archive.org/web/20221013121459/https://randomprojects.org/wiki/Voltcraft_DSO-3062C
 
 <img src="./screenshot/2019-05-05 11:58:17.png" alt="Screenshot" />
 

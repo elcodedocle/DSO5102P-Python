@@ -1,0 +1,4 @@
+-i https://pypi.org/simple
+numpy==2.4
+opencv-python==4.13.0.92
+pyusb==1.3
