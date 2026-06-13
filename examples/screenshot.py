@@ -14,10 +14,11 @@ def main():
     st = dso.read_system_time()
     cv2.imwrite('./screenshot/' + st + '.png', r)
 
-    print('Press ESC to exit ...')
+    print('Press ESC with the screenshot window focused to exit ...')
     cv2.imshow(st, r)
-    while cv2.waitKey(5) != 27:
-        pass
+    cv2.setWindowProperty(st, cv2.WND_PROP_TOPMOST, 1)
+    while (cv2.waitKey(20) & 0xFF) != 27:
+        continue
     cv2.destroyAllWindows()
 
 

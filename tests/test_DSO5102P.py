@@ -16,16 +16,29 @@ from unittest.mock import MagicMock, patch
 # ---------------------------------------------------------------------------
 _usb_stub = types.ModuleType("usb")
 _usb_core_stub = types.ModuleType("usb.core")
+_usb_backend_stub = types.ModuleType("usb.backend")
+_usb_backend_libusb1_stub = types.ModuleType("usb.backend.libusb1")
 
 class _USBError(Exception):
     pass
 
+class _USBTimeoutError(_USBError):
+    pass
+
 _usb_core_stub.USBError = _USBError
+_usb_core_stub.USBTimeoutError = _USBTimeoutError
 _usb_core_stub.find = lambda **kw: None        # placeholder; overridden in tests
 _usb_stub.core = _usb_core_stub
 
+_usb_backend_libusb1_stub.get_backend = MagicMock()
+
+_usb_stub.backend = _usb_backend_stub
+_usb_backend_stub.libusb1 = _usb_backend_libusb1_stub
+
 sys.modules.setdefault("usb", _usb_stub)
 sys.modules.setdefault("usb.core", _usb_core_stub)
+sys.modules.setdefault("usb.backend", _usb_backend_stub)
+sys.modules.setdefault("usb.backend.libusb1", _usb_backend_libusb1_stub)
 
 import src.dso5102p.DSO5102P as mod   # noqa: E402
 
@@ -39,6 +52,7 @@ def _make_usb_mock(dev):
     usb = MagicMock()
     usb.core.find.return_value = dev
     usb.core.USBError = _USBError
+    usb.core.USBTimeoutError = _USBTimeoutError
     return usb
 
 
@@ -47,7 +61,7 @@ def _make_device(flush_raises=True):
     dev.is_kernel_driver_active.return_value = True
     dev.write = MagicMock()
     if flush_raises:
-        dev.read.side_effect = _USBError("timeout")
+        dev.read.side_effect = _USBTimeoutError("timeout")
     return dev
 
 
@@ -85,16 +99,48 @@ class TestInit(unittest.TestCase):
             with self.assertRaises(IOError):
                 mod.DSO5102P(0x049F, 0x505A)
 
+    @patch("sys.platform", "linux")
     def test_detach_kernel_driver_called(self):
         dev = _make_device()
         _make_dso(dev)
         dev.detach_kernel_driver.assert_called_once_with(0)
 
+    @patch("sys.platform", "linux")
     def test_no_detach_when_driver_inactive(self):
         dev = _make_device()
         dev.is_kernel_driver_active.return_value = False
         _make_dso(dev)
         dev.detach_kernel_driver.assert_not_called()
+
+    @patch("sys.platform", "darwin")
+    def test_macos_initialization(self):
+        dev = _make_device()
+        with patch("os.path.exists", return_value=True):
+            _make_dso(dev)
+        dev.set_configuration.assert_called_once()
+
+    @patch("sys.platform", "darwin")
+    def test_macos_initialization_no_brew(self):
+        dev = _make_device()
+        with patch("os.path.exists", return_value=False):
+            _make_dso(dev)
+        dev.set_configuration.assert_called_once()
+
+    @patch("sys.platform", "darwin")
+    def test_macos_initialization_resource_busy_ignored(self):
+        dev = _make_device()
+        dev.set_configuration.side_effect = _USBError("Resource busy")
+        with patch("os.path.exists", return_value=True):
+            _make_dso(dev)
+        dev.set_configuration.assert_called_once()
+
+    @patch("sys.platform", "darwin")
+    def test_macos_initialization_other_usb_error_raised(self):
+        dev = _make_device()
+        dev.set_configuration.side_effect = _USBError("Some other error")
+        with patch("os.path.exists", return_value=True):
+            with self.assertRaises(_USBError):
+                _make_dso(dev)
 
     def test_flush_loop_drains_then_breaks(self):
         dev = _make_device(flush_raises=False)

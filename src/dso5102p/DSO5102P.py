@@ -11,11 +11,14 @@
 #
 
 import logging
+import os
+import sys
+
 import usb
 import time
 import array
 import numpy as np
-
+import usb.backend.libusb1
 
 class DSO5102P:
     def __init__(self, id_vendor=0x049f, id_product=0x505a, debug=False):
@@ -25,25 +28,51 @@ class DSO5102P:
             self.log.setLevel(logging.DEBUG)
         else:
             self.log.setLevel(logging.INFO)
-        self.dev = usb.core.find(idVendor=id_vendor, idProduct=id_product)
+        if sys.platform.startswith('darwin'):
+            backend = self.get_macos_backend()
+            self.dev = usb.core.find(backend=backend, idVendor=id_vendor, idProduct=id_product)
+        else:
+            self.dev = usb.core.find(idVendor=id_vendor, idProduct=id_product)
+
         if self.dev is None:
             raise IOError('DSO5102P Not found')
 
-        # unload 'cdc_subset'
-        if self.dev.is_kernel_driver_active(0):
-            self.dev.detach_kernel_driver(0)
+        if sys.platform.startswith('darwin'):
+            try:
+                # Called with no arguments, it sets the first configuration found
+                self.dev.set_configuration()
+            except usb.core.USBError as e:
+                # Suppress if already set or busy, otherwise raise
+                if "Resource busy" not in str(e):
+                    raise
+        else:
+            # unload 'cdc_subset'
+            if self.dev.is_kernel_driver_active(0):
+                self.dev.detach_kernel_driver(0)
 
         # clean buffers
         while True:
             try:
                 r = self.dev.read(0x81, 512, 1000)
                 self._dump('FLUSH', r)
+            except usb.core.USBTimeoutError:
+                self.log.debug("Buffer empty, continuing...")
+                break
             except usb.core.USBError as e:
                 self.log.exception('FLUSH:', exc_info=e)
                 break
 
     def _dump(self, origin, data):
         self.log.debug("%s: %s", origin, ['0x%02X' % h for h in data])
+
+    @staticmethod
+    def get_macos_backend():
+        # Common Homebrew path for Apple Silicon
+        brew_lib_path = "/opt/homebrew/lib/libusb-1.0.dylib"
+
+        if os.path.exists(brew_lib_path):
+            return usb.backend.libusb1.get_backend(find_library=lambda x: brew_lib_path)
+        return usb.backend.libusb1.get_backend()
 
     def _send_command(self, origin, cmd, data, is_debug=False):
         assert isinstance(data, array.array), '\'data\' must be array.array(\'B\')'

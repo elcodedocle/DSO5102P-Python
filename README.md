@@ -16,6 +16,10 @@ and reload udev rules with
     $ sudo udevadm control --reload-rules
     $ sudo udevadm trigger
 
+For MacOS, make sure libusb is available in `/opt/homebrew/lib/libusb-1.0.dylib`:
+
+    $ brew install libusb
+
 Implemented and tested functions:
 * Echo: send data bytes a returned unchanged
 * ReadFile: read any file from the DSO filesystem
