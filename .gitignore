@@ -104,3 +104,4 @@ venv.bak/
 .mypy_cache/
 /screenshot/
 examples/*.png
+/examples/live_wave_data.csv

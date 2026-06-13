@@ -258,7 +258,7 @@ class TestReadSampleData(unittest.TestCase):
 
     def test_channel_masked_to_one_bit(self):
         dso = _make_dso()
-        dso.dev.read.side_effect = [self._resp(0x00)]
+        dso.dev.read.side_effect = [self._resp(0x00), self._resp(0x02)]
         dso.read_sample_data(0xFF)
         written = dso.dev.write.call_args[0][1]
         self.assertEqual(written[5], 0x01)   # 0xFF & 0x01
@@ -363,6 +363,61 @@ class TestRemoteShell(unittest.TestCase):
         dso.remote_shell("id")
         w = dso.dev.write.call_args[0][1]
         self.assertEqual(w[0], 0x43)
+
+
+class TestCSVStreamer(unittest.TestCase):
+    def test_stream_loop_writes_csv_format(self):
+        import io
+        dso = _make_dso()
+        dso.unlock_control_panel = MagicMock()
+        
+        # Mock read_settings response: 208 bytes of settings
+        settings_payload = [0] * 208
+        settings_payload[1] = 11  # CH1 voltbase index 11 (5V / 5000000 uV)
+        settings_payload[11] = 11 # CH2 voltbase index 11
+        settings_payload[160] = 18 # timebase index 18 (2ms / 2000000000 ps)
+        
+        # Mock read_sample_data response (0x82):
+        # We need subcommand 0x01 with some data, and then subcommand 0x02 to terminate.
+        sample_data_packet_1 = _make_response(0x82, [0x01, 0x00, 67, 66])  # subcommand 0x01, data=[67, 66]
+        sample_data_packet_2 = _make_response(0x82, [0x02, 0x00])          # subcommand 0x02
+        
+        dso.dev.read.side_effect = [
+            _make_response(0x81, settings_payload),  # ReadSettings
+            sample_data_packet_1,                    # ReadSampleData chunk 1
+            sample_data_packet_2                     # ReadSampleData chunk 2
+        ]
+        
+        # We set self._streaming = True and run _stream_loop for one iteration
+        dso._streaming = True
+        
+        dso.lock_control_panel = MagicMock()
+        original_read_sample_data = dso.read_sample_data
+        def mock_read_sample_data(channel):
+            res = original_read_sample_data(channel)
+            dso._streaming = False # stop loop after reading first buffer
+            return res
+        dso.read_sample_data = mock_read_sample_data
+        
+        output = io.StringIO()
+        dso._stream_loop(output, capture_duration_s=None, channel=0)
+        
+        csv_content = output.getvalue()
+        self.assertIn("#timebase=2000000000(ps)", csv_content)
+        self.assertIn(",#voltbase=5000000(uV)", csv_content)
+        self.assertIn("#size=2", csv_content)
+        # Verify first row: size < 8000 uses 80 samples_per_div.
+        # dt = 0.002s / 80 = 2.50000E-05
+        self.assertIn("2.50000E-05,13400.000", csv_content)
+        # Verify second row: time 5.00000E-05, voltage 13200.000
+        self.assertIn("5.00000E-05,13200.000", csv_content)
+
+    def test_start_stop(self):
+        dso = _make_dso()
+        dso.start(capture_duration_s=0.1)
+        self.assertTrue(dso._streaming)
+        dso.stop()
+        self.assertFalse(dso._streaming)
 
 
 if __name__ == "__main__":

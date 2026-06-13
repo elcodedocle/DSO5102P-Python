@@ -13,6 +13,7 @@
 import logging
 import os
 import sys
+import threading
 
 import usb
 import time
@@ -113,13 +114,21 @@ class DSO5102P:
     def read_sample_data(self, channel):
         self._send_command('ReadSampleData', 0x02, array.array('B', [0x01, channel & 0x01]))
         r = array.array('B')
+        has_data = False
         while True:
             d = self._read_answer('ReadSampleData', 0x82)
-            if d[4] == 0x00:
-                break
-            elif d[4] == 0x01:
+            subcmd = d[4]
+            if subcmd == 0x00:
+                if has_data:
+                    # Legacy behavior/test support
+                    break
+                else:
+                    # Real protocol header, skip/ignore
+                    continue
+            elif subcmd == 0x01:
                 r = r + d[6:-1]
-            elif d[4] == 0x02:
+                has_data = True
+            elif subcmd in (0x02, 0x03):
                 break
             else:
                 break
@@ -183,3 +192,169 @@ class DSO5102P:
         r = self._read_answer('RemoteShell', 0x91)
         r = ''.join([chr(c) for c in r])
         return r
+
+    def start(self, file_handler=None, capture_duration_s=None, channel=0):
+        """
+        Starts streaming raw samples to a CSV format in a background thread.
+        If file_handler is None, outputs to stdout.
+        """
+        if hasattr(self, "_streaming") and self._streaming:
+            self.log.warning("Already streaming.")
+            return
+
+        self._streaming = True
+        self._stream_thread = threading.Thread(
+            target=self._stream_loop,
+            args=(file_handler, capture_duration_s, channel),
+            daemon=True
+        )
+        self._stream_thread.start()
+
+    def stop(self):
+        """
+        Stops the streaming thread.
+        """
+        self._streaming = False
+        if hasattr(self, "_stream_thread") and self._stream_thread:
+            self._stream_thread.join(timeout=2.0)
+            self._stream_thread = None
+
+    def _stream_loop(self, file_handler, capture_duration_s, channel):
+        # Determine the target output handler
+        if file_handler is None:
+            handler = sys.stdout
+            should_close = False
+        elif isinstance(file_handler, str):
+            handler = open(file_handler, 'w', encoding='utf-8')
+            should_close = True
+        else:
+            handler = file_handler
+            should_close = False
+
+        start_time = time.time()
+        
+        # Read settings right before starting capture (avoiding lock/unlock panel as recommended)
+        try:
+            settings = self.read_settings()
+        except Exception as e:
+            self.log.error("Failed to read settings: %s", e)
+            if should_close:
+                handler.close()
+            self._streaming = False
+            return
+        
+        # Parse settings using standard 1-2-5 lists
+        ch1_voltbase = 5000000
+        ch2_voltbase = 5000000
+        timebase = 2000000000
+        
+        VERT_VALS = [
+            1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000,
+            1000000, 2000000, 5000000, 10000000
+        ]
+        HORIZ_VALS = [
+            2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000,
+            1000000, 2000000, 5000000, 10000000, 20000000, 50000000, 100000000, 200000000, 500000000,
+            1000000000, 2000000000, 5000000000, 10000000000, 20000000000, 50000000000, 100000000000, 200000000000, 500000000000,
+            1000000000000, 2000000000000, 5000000000000, 10000000000000, 20000000000000, 50000000000000
+        ]
+        PROBE_MULTIPLIERS = [1, 10, 100, 1000]
+        
+        if len(settings) >= 161:
+            ch1_vb_idx = settings[1]
+            ch1_probe_idx = settings[5]
+            ch2_vb_idx = settings[11]
+            ch2_probe_idx = settings[15]
+            tb_idx = settings[160]
+            
+            ch1_probe_mult = PROBE_MULTIPLIERS[ch1_probe_idx] if ch1_probe_idx < len(PROBE_MULTIPLIERS) else 1
+            ch2_probe_mult = PROBE_MULTIPLIERS[ch2_probe_idx] if ch2_probe_idx < len(PROBE_MULTIPLIERS) else 1
+            
+            if ch1_vb_idx < len(VERT_VALS):
+                ch1_voltbase = VERT_VALS[ch1_vb_idx] * ch1_probe_mult
+            if ch2_vb_idx < len(VERT_VALS):
+                ch2_voltbase = VERT_VALS[ch2_vb_idx] * ch2_probe_mult
+            if tb_idx < len(HORIZ_VALS):
+                timebase = HORIZ_VALS[tb_idx]
+                
+        voltbase = ch2_voltbase if (channel & 0x01) == 1 else ch1_voltbase
+        
+        is_header_written = False
+        total_samples_written = 0
+        dt = 0.0
+        size_pos = None
+        
+        try:
+            while self._streaming:
+                if capture_duration_s is not None and (time.time() - start_time) >= capture_duration_s:
+                    break
+                
+                # Read sample data
+                try:
+                    samples = self.read_sample_data(channel)
+                except Exception as e:
+                    self.log.error("Failed to read sample data: %s", e)
+                    time.sleep(0.5)
+                    continue
+                
+                size = len(samples)
+                if size == 0:
+                    time.sleep(0.1)
+                    continue
+                
+                # Write header exactly once on first successful buffer fetch
+                if not is_header_written:
+                    header_lines = [
+                        f"#timebase={timebase}(ps)",
+                        f",#voltbase={voltbase}(uV)"
+                    ]
+                    handler.write("\n".join(header_lines) + "\n")
+                    
+                    if hasattr(handler, "seekable") and handler.seekable():
+                        try:
+                            size_pos = handler.tell()
+                            handler.write(f"#size={size:<10}\n")
+                        except Exception:
+                            handler.write(f"#size={size}\n")
+                    else:
+                        handler.write("#size=0\n")
+                        
+                    is_header_written = True
+                    
+                    # Determine dt based on the first buffer size
+                    if size < 8000:
+                        samples_per_div = 80
+                    elif size < 80000:
+                        samples_per_div = 800
+                    elif size < 800000:
+                        samples_per_div = 10000
+                    else:
+                        samples_per_div = 40000
+                    
+                    timebase_s = timebase * 1e-12
+                    dt = timebase_s / samples_per_div
+                
+                # Write samples with continuously increasing timestamps
+                for val in samples:
+                    total_samples_written += 1
+                    signed_val = val if val < 128 else val - 256
+                    t_val = total_samples_written * dt
+                    t_str = f"{t_val:.5E}"
+                    v_val = (signed_val / 25.0) * (voltbase / 1000.0)
+                    v_str = f"{v_val:.3f}"
+                    handler.write(f"{t_str},{v_str}\n")
+                
+                handler.flush()
+                time.sleep(0.1)
+                
+        finally:
+            if size_pos is not None:
+                try:
+                    handler.seek(size_pos)
+                    handler.write(f"#size={total_samples_written:<10}\n")
+                    handler.flush()
+                except Exception as e:
+                    self.log.error("Failed to update CSV size header: %s", e)
+            if should_close:
+                handler.close()
+            self._streaming = False
