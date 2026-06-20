@@ -104,6 +104,8 @@ def get_index():
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     active_connections.add(websocket)
+    # Capture the streamer instance active at the time of connection
+    my_streamer = live_streamer
     print(f"WebSocket client connected. Total clients: {len(active_connections)}", flush=True)
     try:
         while True:
@@ -114,14 +116,25 @@ async def websocket_endpoint(websocket: WebSocket):
     finally:
         active_connections.discard(websocket)
         print(f"WebSocket client disconnected. Total clients: {len(active_connections)}", flush=True)
+        # Only perform automatic stream cleanup if:
+        # 1. This disconnect belongs to the currently active stream session
+        # 2. There are no remaining active connections
+        if len(active_connections) == 0 and live_streamer is not None and live_streamer is my_streamer:
+            print("Last WebSocket client of the current session disconnected. Performing automatic stream cleanup.", flush=True)
+            try:
+                await live_stop()
+            except Exception as e:
+                print(f"Error during automatic stream cleanup: {e}", flush=True)
 
 
 @app.post("/api/live/start")
 async def live_start(channel: int = 0):
     global dso, live_streamer, mock_thread, mock_active
     
+    # If a streamer is already running (e.g. from an old reloaded session), stop it first
     if live_streamer is not None:
-        return {"status": "already_running", "mock": mock_active}
+        print("Streamer already running during start. Stopping old stream first...", flush=True)
+        await live_stop()
 
     # Grab the running asyncio loop to allow threads to write to WebSockets
     loop = asyncio.get_running_loop()
@@ -130,7 +143,11 @@ async def live_start(channel: int = 0):
     # Attempt physical DSO connection
     if DSO5102P is not None:
         try:
-            dso = DSO5102P(0x049f, 0x505a, debug=False)
+            # Initialize physical DSO in executor to avoid blocking the FastAPI event loop
+            def create_dso():
+                return DSO5102P(0x049f, 0x505a, debug=False)
+            
+            dso = await loop.run_in_executor(None, create_dso)
             print("Physical DSO5102P Connected. Starting streaming...", flush=True)
             dso.start(file_handler=live_streamer, channel=channel)
             mock_active = False
@@ -156,7 +173,10 @@ async def live_stop():
     # Stop physical DSO
     if dso is not None:
         try:
-            dso.stop()
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, dso.stop)
+            if hasattr(dso, 'close'):
+                await loop.run_in_executor(None, dso.close)
         except Exception as e:
             print(f"Error stopping DSO: {e}", flush=True)
         dso = None
@@ -165,7 +185,11 @@ async def live_stop():
     if mock_active:
         mock_active = False
         if mock_thread is not None:
-            mock_thread.join(timeout=1.0)
+            try:
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, mock_thread.join, 1.0)
+            except Exception:
+                pass
             mock_thread = None
             
     live_streamer = None

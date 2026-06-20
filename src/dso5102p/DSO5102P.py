@@ -220,6 +220,32 @@ class DSO5102P:
             self._stream_thread.join(timeout=2.0)
             self._stream_thread = None
 
+    def close(self):
+        """
+        Explicitly releases and disposes the USB device resources.
+        """
+        if hasattr(self, 'dev') and self.dev is not None:
+            try:
+                # To avoid making 'usb' a local variable, we import with an alias
+                try:
+                    import usb.util as usb_util
+                    usb_util.dispose_resources(self.dev)
+                except (ImportError, AttributeError):
+                    # Fall back to using the global 'usb' module if it has the util
+                    # (this happens when 'usb' is a mock during unit tests)
+                    g_usb = globals().get('usb')
+                    if g_usb is not None and hasattr(g_usb, "util") and hasattr(g_usb.util, "dispose_resources"):
+                        g_usb.util.dispose_resources(self.dev)
+            except Exception as e:
+                self.log.warning(f"Error during USB resource disposal: {e}")
+            self.dev = None
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
+
     def _stream_loop(self, file_handler, capture_duration_s, channel):
         # Determine the target output handler
         if file_handler is None:
