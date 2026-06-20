@@ -624,8 +624,8 @@ class OscilloscopeApp {
     
     onPlaybackSpeedChange(value) {
         const sliderVal = parseInt(value);
-        this.playbackSpeed = sliderVal / 10.0;
-        this.speedValText.textContent = `${this.playbackSpeed.toFixed(1)}x`;
+        this.playbackSpeed = Math.pow(10, -4 + sliderVal / 10.0);
+        this.speedValText.textContent = `${this.playbackSpeed.toFixed(this.playbackSpeed < 0.01 ? 3 : (this.playbackSpeed < 0.1 ? 2 : this.playbackSpeed < 1 ? 1 : 0))}x`;
     }
     
     playbackLoop() {
