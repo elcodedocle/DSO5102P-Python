@@ -113,6 +113,7 @@ class OscilloscopeApp {
         this.timeZoomOut.addEventListener('click', () => this.adjustTimebase(1));
         this.timeZoomIn.addEventListener('click', () => this.adjustTimebase(-1));
         this.timeScroll.addEventListener('input', (e) => this.onTimeScroll(e.target.value));
+        this.initTimeScrollPrecisionScrubbing();
         
         // Vertical calibration event listeners
         this.voltZoomOut.addEventListener('click', () => this.adjustVoltbase(1));
@@ -680,6 +681,7 @@ class OscilloscopeApp {
     }
     
     onTimeScroll(value) {
+        if (this.isCustomDragging) return;
         this.horizontalPosition = parseFloat(value) / 100;
         this.updateSlidersAndReadouts();
         this.drawOscilloscope();
@@ -952,6 +954,108 @@ class OscilloscopeApp {
         
         this.ctx.stroke();
         this.ctx.shadowBlur = 0;
+    }
+
+    initTimeScrollPrecisionScrubbing() {
+        let startX = 0;
+        let startPos = 0;
+        let isDragging = false;
+        let hasMoved = false;
+        const originalLabelText = "Position (Scroll)";
+        
+        // Find the label element for Position (Scroll)
+        const labelEl = this.timeScroll.parentElement.querySelector('label');
+
+        this.timeScroll.addEventListener('pointerdown', (e) => {
+            // Only handle primary button drag
+            if (e.button !== 0) return;
+            
+            isDragging = true;
+            this.isCustomDragging = true; // prevent native 'input' event conflict
+            hasMoved = false;
+            startX = e.clientX;
+            startPos = this.horizontalPosition;
+            
+            this.timeScroll.setPointerCapture(e.pointerId);
+            e.preventDefault();
+        });
+
+        this.timeScroll.addEventListener('pointermove', (e) => {
+            if (!isDragging) return;
+            
+            const dx = e.clientX - startX;
+            if (!hasMoved && Math.abs(dx) > 4) {
+                hasMoved = true;
+            }
+            
+            if (hasMoved) {
+                const rect = this.timeScroll.getBoundingClientRect();
+                const sliderWidth = rect.width || 1;
+                
+                // Relative displacement
+                const t = dx / sliderWidth;
+                
+                // Cubic non-linear relative drag
+                // As we move further away from startX, deltaP grows exponentially.
+                // scale factor (e.g. 2.0) allows traversing the entire slider or more.
+                const scale = 2.0; 
+                const power = 3.0;
+                const deltaP = Math.sign(t) * Math.pow(Math.abs(t), power) * scale;
+                
+                this.horizontalPosition = Math.max(0.0, Math.min(1.0, startPos + deltaP));
+                
+                // Calculate and display dynamic speed multiplier feedback
+                // speedMultiplier is the derivative: d(deltaP)/dt = power * |t|^(power-1) * scale
+                const speedMultiplier = power * Math.pow(Math.abs(t), power - 1) * scale;
+                
+                if (labelEl) {
+                    if (speedMultiplier < 0.9) {
+                        // Fine tracking zone
+                        const fraction = Math.round(1 / Math.max(0.0001, speedMultiplier));
+                        labelEl.textContent = `Position (Scroll - Fine: 1/${fraction}x)`;
+                    } else if (speedMultiplier > 1.1) {
+                        // Fast tracking zone
+                        labelEl.textContent = `Position (Scroll - Fast: ${speedMultiplier.toFixed(1)}x)`;
+                    } else {
+                        // Normal zone
+                        labelEl.textContent = `Position (Scroll: 1.0x)`;
+                    }
+                }
+                
+                this.updateSlidersAndReadouts();
+                this.drawOscilloscope();
+            }
+        });
+
+        const endDrag = (e) => {
+            if (!isDragging) return;
+            
+            isDragging = false;
+            this.isCustomDragging = false;
+            
+            try {
+                this.timeScroll.releasePointerCapture(e.pointerId);
+            } catch (err) {}
+            
+            // Restore label
+            if (labelEl) {
+                labelEl.textContent = originalLabelText;
+            }
+            
+            // If the user didn't drag past the threshold, treat it as an instant click to jump
+            if (!hasMoved) {
+                const rect = this.timeScroll.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const clickRatio = Math.max(0, Math.min(1, clickX / (rect.width || 1)));
+                
+                this.horizontalPosition = clickRatio;
+                this.updateSlidersAndReadouts();
+                this.drawOscilloscope();
+            }
+        };
+
+        this.timeScroll.addEventListener('pointerup', endDrag);
+        this.timeScroll.addEventListener('pointercancel', endDrag);
     }
 }
 
