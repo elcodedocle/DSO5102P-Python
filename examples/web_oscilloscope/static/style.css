@@ -343,3 +343,31 @@ select:focus {
 .status-error {
     color: #ff3333;
 }
+
+/* Checkbox and toggle control styling */
+.checkbox-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 5px;
+}
+
+.checkbox-label {
+    display: flex !important;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: #aaaaaa;
+    user-select: none;
+}
+
+.checkbox-label input[type="checkbox"] {
+    accent-color: #00ff66;
+    width: 15px;
+    height: 15px;
+    cursor: pointer;
+}
+

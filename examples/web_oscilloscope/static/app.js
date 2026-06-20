@@ -93,6 +93,37 @@ class OscilloscopeApp {
             1.0, 2.0, 5.0, 10.0, 20.0, 50.0
         ];
         
+        // Trigger Controls
+        this.triggerEnable = document.getElementById('trigger-enable');
+        this.triggerAction = document.getElementById('trigger-action');
+        this.triggerLow = document.getElementById('trigger-low');
+        this.triggerLowVal = document.getElementById('trigger-low-val');
+        this.triggerHigh = document.getElementById('trigger-high');
+        this.triggerHighVal = document.getElementById('trigger-high-val');
+        this.triggerSamples = document.getElementById('trigger-samples');
+        this.triggerSamplesVal = document.getElementById('trigger-samples-val');
+        this.triggerTime = document.getElementById('trigger-time');
+        this.triggerTimeVal = document.getElementById('trigger-time-val');
+        this.postTriggerDelay = document.getElementById('post-trigger-delay');
+        this.postTriggerVal = document.getElementById('post-trigger-val');
+        this.postTriggerAuto = document.getElementById('post-trigger-auto');
+
+        // Trigger State
+        this.triggerEnabled = false;
+        this.triggerActionVal = 'pause';
+        this.triggerLowDiv = -1.0;
+        this.triggerHighDiv = 1.0;
+        this.triggerMinSamples = 1;
+        this.triggerMinTimeSec = 0.0;
+        
+        this.isTriggered = false;
+        this.postTriggerCounter = -1;
+        this.consecutiveOutsideSamples = 0;
+        this.triggerStartTime = null;
+        
+        this.triggerLowVolts = -1.0;
+        this.triggerHighVolts = 1.0;
+
         this.init();
     }
     
@@ -123,6 +154,16 @@ class OscilloscopeApp {
         // Speed calibration event listener
         this.playbackSpeedSlider.addEventListener('input', (e) => this.onPlaybackSpeedChange(e.target.value));
         
+        // Trigger controls event listeners
+        this.triggerEnable.addEventListener('change', (e) => this.onTriggerEnableChange(e.target.checked));
+        this.triggerAction.addEventListener('change', (e) => this.onTriggerActionChange(e.target.value));
+        this.triggerLow.addEventListener('input', (e) => this.onTriggerLowChange(e.target.value));
+        this.triggerHigh.addEventListener('input', (e) => this.onTriggerHighChange(e.target.value));
+        this.triggerSamples.addEventListener('input', (e) => this.onTriggerSamplesChange(e.target.value));
+        this.triggerTime.addEventListener('input', (e) => this.onTriggerTimeChange(e.target.value));
+        this.postTriggerDelay.addEventListener('input', (e) => this.onPostTriggerDelayChange(e.target.value));
+        this.postTriggerAuto.addEventListener('change', (e) => this.onPostTriggerAutoChange(e.target.checked));
+        
         // Load default mock sine wave on boot to make it alive
         this.loadDefaultMockWaveform();
         
@@ -132,6 +173,60 @@ class OscilloscopeApp {
         // Perform initial draw
         this.drawOscilloscope();
     }
+    
+    onTriggerEnableChange(enabled) {
+        this.triggerEnabled = enabled;
+        if (enabled) {
+            this.resetTriggerState();
+        }
+        this.drawOscilloscope();
+    }
+
+    onTriggerActionChange(action) {
+        this.triggerActionVal = action;
+        this.resetTriggerState();
+    }
+
+    onTriggerLowChange(value) {
+        this.triggerLowDiv = parseFloat(value) / 25;
+        this.updateSlidersAndReadouts();
+        this.drawOscilloscope();
+    }
+
+    onTriggerHighChange(value) {
+        this.triggerHighDiv = parseFloat(value) / 25;
+        this.updateSlidersAndReadouts();
+        this.drawOscilloscope();
+    }
+
+    onTriggerSamplesChange(value) {
+        this.triggerMinSamples = parseInt(value);
+        this.updateSlidersAndReadouts();
+    }
+
+    onTriggerTimeChange(value) {
+        const ms = parseFloat(value) / 10;
+        this.triggerMinTimeSec = ms / 1000.0;
+        this.updateSlidersAndReadouts();
+    }
+
+    onPostTriggerDelayChange(value) {
+        this.postTriggerDelayVal = parseInt(value);
+        this.postTriggerAuto.checked = false;
+        this.updateSlidersAndReadouts();
+    }
+
+    onPostTriggerAutoChange(autoChecked) {
+        this.updateSlidersAndReadouts();
+    }
+
+    resetTriggerState() {
+        this.isTriggered = false;
+        this.postTriggerCounter = -1;
+        this.consecutiveOutsideSamples = 0;
+        this.triggerStartTime = null;
+    }
+
     
     resizeCanvas() {
         const rect = this.canvas.parentElement.getBoundingClientRect();
@@ -199,6 +294,9 @@ class OscilloscopeApp {
         this.displayFrozen = false;
         this.freezeBtn.textContent = "Freeze Display";
         this.freezeBtn.className = "btn btn-blue";
+        
+        // Reset trigger
+        this.resetTriggerState();
     }
     
     onLocalFileSelected(e) {
@@ -578,6 +676,66 @@ class OscilloscopeApp {
         this.voltageData = combinedVoltage;
         this.capturedCount.textContent = (this.totalRecordingSamples > 0 ? this.totalRecordingSamples : this.timeData.length).toLocaleString();
         
+        // 3. Trigger Logic (Real-time Mode)
+        if (this.triggerEnabled) {
+            if (!this.isTriggered) {
+                // Scan newly parsed points
+                for (let i = 0; i < newPoints; i++) {
+                    const t = appendRows[i * 2];
+                    const v = appendRows[i * 2 + 1];
+                    const isOutside = (v < this.triggerLowVolts || v > this.triggerHighVolts);
+                    
+                    if (isOutside) {
+                        if (this.triggerStartTime === null) {
+                            this.triggerStartTime = t;
+                        }
+                        this.consecutiveOutsideSamples++;
+                        const duration = t - this.triggerStartTime;
+                        
+                        if (this.consecutiveOutsideSamples >= this.triggerMinSamples && duration >= this.triggerMinTimeSec) {
+                            this.isTriggered = true;
+                            
+                            if (this.triggerActionVal === 'pause') {
+                                this.displayFrozen = true;
+                                this.freezeBtn.textContent = "Unfreeze Display";
+                                this.freezeBtn.className = "btn btn-red";
+                                this.statusText.textContent = "Triggered (Display Frozen)";
+                                this.statusText.className = "status-wait";
+                                this.drawOscilloscope();
+                                return;
+                            } else if (this.triggerActionVal === 'stop') {
+                                // Start counting post-trigger samples
+                                this.postTriggerCounter = newPoints - 1 - i;
+                                this.statusText.textContent = "Triggered! Capturing post-delay...";
+                                this.statusText.className = "status-wait";
+                            }
+                            break; // Stop scanning further points in this chunk
+                        }
+                    } else {
+                        this.consecutiveOutsideSamples = 0;
+                        this.triggerStartTime = null;
+                    }
+                }
+            } else if (this.postTriggerCounter >= 0) {
+                // Already triggered, increment post-trigger sample counter
+                this.postTriggerCounter += newPoints;
+            }
+            
+            // Check if post-trigger sample limit is met
+            if (this.isTriggered && this.triggerActionVal === 'stop' && this.postTriggerCounter >= this.postTriggerDelayVal) {
+                this.stopLiveStreaming();
+                this.displayFrozen = true;
+                this.freezeBtn.textContent = "Unfreeze Display";
+                this.freezeBtn.className = "btn btn-red";
+                this.statusText.textContent = `Triggered & Stopped (+${this.postTriggerCounter} samples)`;
+                this.statusText.className = "status-wait";
+                
+                this.updateSlidersAndReadouts();
+                this.drawOscilloscope();
+                return;
+            }
+        }
+
         // Skip redraws entirely if display is frozen (saves massive CPU resources!)
         if (this.displayFrozen) return;
         
@@ -601,9 +759,17 @@ class OscilloscopeApp {
             this.freezeBtn.className = "btn btn-blue";
             this.statusText.textContent = "Streaming Live";
             this.statusText.className = "status-ok";
-            // Immediately redraw current buffer upon unfreezing
-            this.updateSlidersAndReadouts();
-            this.drawOscilloscope();
+            
+            // Reset trigger state upon unfreeze
+            this.resetTriggerState();
+            
+            if (this.mode === 'realtime' && !this.isLiveStreaming) {
+                this.startLiveStreaming();
+            } else {
+                // Immediately redraw current buffer upon unfreezing
+                this.updateSlidersAndReadouts();
+                this.drawOscilloscope();
+            }
         }
     }
     
@@ -615,6 +781,7 @@ class OscilloscopeApp {
             this.statusText.textContent = "Playback Paused";
         } else {
             if (this.timeData.length === 0) return;
+            this.resetTriggerState();
             this.playbackPlaying = true;
             this.playBtn.textContent = "Pause";
             this.playBtn.className = "btn btn-red";
@@ -659,8 +826,68 @@ class OscilloscopeApp {
         this.timeScroll.value = Math.round(this.horizontalPosition * 100);
         this.updateSlidersAndReadouts();
         this.drawOscilloscope();
+
+        // Trigger check in playback mode
+        if (this.triggerEnabled && !this.isTriggered && this.timeData.length > 0) {
+            const viewportStartT = startT + (this.horizontalPosition * Math.max(0, totalDuration - screenDuration));
+            const viewportEndT = viewportStartT + screenDuration;
+
+            let startIndex = 0;
+            let endIndex = this.timeData.length - 1;
+
+            let low = 0, high = this.timeData.length - 1;
+            while (low <= high) {
+                const mid = (low + high) >> 1;
+                if (this.timeData[mid] < viewportStartT) {
+                    startIndex = mid;
+                    low = mid + 1;
+                } else {
+                    high = mid - 1;
+                }
+            }
+
+            low = 0; high = this.timeData.length - 1;
+            while (low <= high) {
+                const mid = (low + high) >> 1;
+                if (this.timeData[mid] <= viewportEndT) {
+                    endIndex = mid;
+                    low = mid + 1;
+                } else {
+                    high = mid - 1;
+                }
+            }
+
+            let consecCount = 0;
+            let trigStartT = null;
+            for (let idx = startIndex; idx <= endIndex; idx++) {
+                const t = this.timeData[idx];
+                const v = this.voltageData[idx];
+                const isOutside = (v < this.triggerLowVolts || v > this.triggerHighVolts);
+                
+                if (isOutside) {
+                    if (trigStartT === null) trigStartT = t;
+                    consecCount++;
+                    const duration = t - trigStartT;
+                    if (consecCount >= this.triggerMinSamples && duration >= this.triggerMinTimeSec) {
+                        this.isTriggered = true;
+                        this.playbackPlaying = false;
+                        this.playBtn.textContent = "Play";
+                        this.playBtn.className = "btn btn-green";
+                        this.statusText.textContent = "Triggered (Playback Paused)";
+                        this.statusText.className = "status-wait";
+                        this.drawOscilloscope();
+                        break;
+                    }
+                } else {
+                    consecCount = 0;
+                    trigStartT = null;
+                }
+            }
+        }
         
-        this.playbackFrameId = requestAnimationFrame(() => this.playbackLoop());
+        if (this.playbackPlaying) {
+            this.playbackFrameId = requestAnimationFrame(() => this.playbackLoop());
+        }
     }
     
     adjustTimebase(direction) {
@@ -846,6 +1073,37 @@ class OscilloscopeApp {
         }
         
         this.osdSize.textContent = this.timeData.length.toLocaleString();
+
+        // Synchronize Trigger UI with voltbase and calculated values
+        this.triggerLowVolts = this.triggerLowDiv * voltbase;
+        this.triggerHighVolts = this.triggerHighDiv * voltbase;
+        
+        this.triggerLowVal.textContent = `${this.triggerLowVolts.toFixed(3)} V`;
+        this.triggerHighVal.textContent = `${this.triggerHighVolts.toFixed(3)} V`;
+        this.triggerLow.value = Math.round(this.triggerLowDiv * 25);
+        this.triggerHigh.value = Math.round(this.triggerHighDiv * 25);
+
+        this.triggerSamplesVal.textContent = `${this.triggerMinSamples} ${this.triggerMinSamples === 1 ? 'sample' : 'samples'}`;
+        this.triggerTimeVal.textContent = `${(this.triggerMinTimeSec * 1000).toFixed(1)} ms`;
+
+        // Calculate dynamic samples per div based on current data density
+        let samples_per_div = 80; // Safe fallback
+        if (this.timeData.length > 1) {
+            const dt = (this.timeData[this.timeData.length - 1] - this.timeData[0]) / (this.timeData.length - 1);
+            if (dt > 0) {
+                samples_per_div = timebase / dt;
+            }
+        }
+
+        if (this.postTriggerAuto.checked) {
+            const autoVal = Math.round(20 * samples_per_div);
+            this.postTriggerDelayVal = isNaN(autoVal) ? 1600 : autoVal;
+            this.postTriggerDelay.value = this.postTriggerDelayVal;
+            this.postTriggerVal.textContent = `Auto (${this.postTriggerDelayVal} samples)`;
+        } else {
+            this.postTriggerVal.textContent = `${this.postTriggerDelayVal} samples`;
+            this.postTriggerDelay.value = this.postTriggerDelayVal;
+        }
     }
     
     formatTime(t) {
@@ -1046,6 +1304,30 @@ class OscilloscopeApp {
         
         this.ctx.stroke();
         this.ctx.shadowBlur = 0;
+
+        // Draw trigger lines if trigger is enabled
+        if (this.triggerEnabled) {
+            this.ctx.lineWidth = 1.0;
+            this.ctx.setLineDash([4, 4]);
+            
+            // Draw Low Threshold (dashed orange-red line)
+            const yLow = getCanvasY(this.triggerLowVolts);
+            this.ctx.strokeStyle = 'rgba(255, 102, 0, 0.6)';
+            this.ctx.beginPath();
+            this.ctx.moveTo(0, yLow);
+            this.ctx.lineTo(width, yLow);
+            this.ctx.stroke();
+
+            // Draw High Threshold (dashed orange-red line)
+            const yHigh = getCanvasY(this.triggerHighVolts);
+            this.ctx.strokeStyle = 'rgba(255, 51, 0, 0.6)';
+            this.ctx.beginPath();
+            this.ctx.moveTo(0, yHigh);
+            this.ctx.lineTo(width, yHigh);
+            this.ctx.stroke();
+
+            this.ctx.setLineDash([]);
+        }
     }
 
     initTimeScrollPrecisionScrubbing() {

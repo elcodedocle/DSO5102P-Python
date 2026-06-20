@@ -110,6 +110,79 @@
                     </div>
                 </div>
 
+                <div class="section-title">TRIGGER CONTROLS</div>
+                <div class="calibration-section">
+                    <div class="knob-control checkbox-control">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="trigger-enable">
+                            Enable Trigger
+                        </label>
+                    </div>
+                    
+                    <div class="knob-control">
+                        <label>Action on Trigger</label>
+                        <select id="trigger-action">
+                            <option value="pause">Pause Display</option>
+                            <option value="stop">Stop Capture</option>
+                        </select>
+                    </div>
+                    
+                    <div class="knob-control">
+                        <label>Low Threshold (V_low)</label>
+                        <input type="range" id="trigger-low" class="slider" min="-125" max="125" value="-25">
+                        <div class="offset-vals">
+                            <span>-5 div</span>
+                            <span id="trigger-low-val">-1.000 V</span>
+                            <span>+5 div</span>
+                        </div>
+                    </div>
+                    
+                    <div class="knob-control">
+                        <label>High Threshold (V_high)</label>
+                        <input type="range" id="trigger-high" class="slider" min="-125" max="125" value="25">
+                        <div class="offset-vals">
+                            <span>-5 div</span>
+                            <span id="trigger-high-val">+1.000 V</span>
+                            <span>+5 div</span>
+                        </div>
+                    </div>
+
+                    <div class="knob-control">
+                        <label>Min Duration (Samples)</label>
+                        <input type="range" id="trigger-samples" class="slider" min="1" max="100" value="1">
+                        <div class="scroll-vals">
+                            <span>1</span>
+                            <span id="trigger-samples-val">1 sample</span>
+                            <span>100</span>
+                        </div>
+                    </div>
+
+                    <div class="knob-control">
+                        <label>Min Duration (Time)</label>
+                        <input type="range" id="trigger-time" class="slider" min="0" max="100" value="0">
+                        <div class="scroll-vals">
+                            <span>0 ms</span>
+                            <span id="trigger-time-val">0.0 ms</span>
+                            <span>10 ms</span>
+                        </div>
+                    </div>
+
+                    <div class="knob-control" id="post-trigger-group">
+                        <label>Post-Trigger Capture (Samples)</label>
+                        <input type="range" id="post-trigger-delay" class="slider" min="0" max="5000" value="1600">
+                        <div class="scroll-vals">
+                            <span>0 (Immediate)</span>
+                            <span id="post-trigger-val">Auto (20x/div)</span>
+                            <span>5000</span>
+                        </div>
+                        <div class="checkbox-control" style="margin-top: 8px;">
+                            <label class="checkbox-label" style="font-size: 11px;">
+                                <input type="checkbox" id="post-trigger-auto" checked> Use Auto (20x samples/div)
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="section-title">STATUS INFO</div>
                 <div class="status-panel">
                     <div>Status: <span id="status-text" class="status-ok">Idle</span></div>
