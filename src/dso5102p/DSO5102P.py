@@ -288,16 +288,38 @@ class DSO5102P:
             pass
 
     def _stream_loop(self, file_handler, capture_duration_s, channel):
-        # Determine the target output handler
-        if file_handler is None:
-            handler = sys.stdout
-            should_close = False
-        elif isinstance(file_handler, str):
-            handler = open(file_handler, 'w', encoding='utf-8')
-            should_close = True
+        # Normalize channel(s) and handler(s)
+        if isinstance(channel, int):
+            channels = [channel]
+            handlers = {channel: file_handler}
+        elif isinstance(channel, (list, tuple)):
+            channels = list(channel)
+            if isinstance(file_handler, dict):
+                handlers = file_handler
+            elif isinstance(file_handler, (list, tuple)):
+                handlers = {ch: file_handler[i] for i, ch in enumerate(channels)}
+            else:
+                handlers = dict.fromkeys(channels, file_handler)
+        elif isinstance(channel, dict):
+            channels = list(channel.keys())
+            handlers = channel
         else:
-            handler = file_handler
-            should_close = False
+            channels = [0]
+            handlers = {0: file_handler}
+
+        # Setup real file objects if paths are passed as handlers
+        opened_handlers = {}
+        normalized_handlers = {}
+        for ch in channels:
+            handler_val = handlers.get(ch, None)
+            if handler_val is None:
+                normalized_handlers[ch] = sys.stdout
+            elif isinstance(handler_val, str):
+                f = open(handler_val, 'w', encoding='utf-8')
+                opened_handlers[ch] = f
+                normalized_handlers[ch] = f
+            else:
+                normalized_handlers[ch] = handler_val
 
         start_time = time.time()
         
@@ -306,8 +328,8 @@ class DSO5102P:
             settings = self.read_settings()
         except Exception as e:
             self.log.error("Failed to read settings: %s", e)
-            if should_close:
-                handler.close()
+            for f in opened_handlers.values():
+                f.close()
             self._streaming = False
             return
         
@@ -345,107 +367,119 @@ class DSO5102P:
             if tb_idx < len(HORIZ_VALS):
                 timebase = HORIZ_VALS[tb_idx]
                 
-        voltbase = ch2_voltbase if (channel & 0x01) == 1 else ch1_voltbase
+        voltbases = {
+            0: ch1_voltbase,
+            1: ch2_voltbase
+        }
         
-        is_header_written = False
-        total_samples_written = 0
-        dt = 0.0
-        size_pos = None
-        _prec_steps = []
-        _prec_idx = 0
-        _t_decimals = 5
+        is_header_written = dict.fromkeys(channels, False)
+        total_samples_written = dict.fromkeys(channels, 0)
+        dt = dict.fromkeys(channels, 0.0)
+        size_pos = dict.fromkeys(channels, None)
+        _prec_steps = {ch: [] for ch in channels}
+        _prec_idx = dict.fromkeys(channels, 0)
+        _t_decimals = dict.fromkeys(channels, 5)
 
         try:
             while self._streaming:
                 if capture_duration_s is not None and (time.time() - start_time) >= capture_duration_s:
                     break
                 
-                # Read sample data
-                try:
-                    samples = self.read_sample_data(channel)
-                except Exception as e:
-                    self.log.error("Failed to read sample data: %s", e)
-                    time.sleep(0.5)
-                    continue
-                
-                size = len(samples)
-                if size == 0:
-                    time.sleep(0.1)
-                    continue
-                
-                # Write header, just once
-                if not is_header_written:
-                    header_lines = [
-                        f"#timebase={timebase}(ps)",
-                        f",#voltbase={voltbase}(uV)"
-                    ]
-                    handler.write("\n".join(header_lines) + "\n")
+                # Fetch data alternately/interpolate to prevent USB collision
+                for ch in channels:
+                    if not self._streaming:
+                        break
                     
-                    if hasattr(handler, "seekable") and handler.seekable():
-                        try:
-                            size_pos = handler.tell()
-                            handler.write(f"#size={size:<10}\n")
-                        except Exception:
-                            handler.write(f"#size={size}\n")
-                    else:
-                        handler.write("#size=0\n")
+                    try:
+                        samples = self.read_sample_data(ch)
+                    except Exception as e:
+                        self.log.error("Failed to read sample data for channel %d: %s", ch, e)
+                        time.sleep(0.05)
+                        continue
+                    
+                    size = len(samples)
+                    if size == 0:
+                        time.sleep(0.05)
+                        continue
+                    
+                    handler = normalized_handlers[ch]
+                    
+                    # Write header, just once
+                    if not is_header_written[ch]:
+                        header_lines = [
+                            f"#timebase={timebase}(ps)",
+                            f",#voltbase={voltbases.get(ch, 5000000)}(uV)"
+                        ]
+                        handler.write("\n".join(header_lines) + "\n")
                         
-                    is_header_written = True
+                        if hasattr(handler, "seekable") and handler.seekable():
+                            try:
+                                size_pos[ch] = handler.tell()
+                                handler.write(f"#size={size:<10}\n")
+                            except Exception:
+                                handler.write(f"#size={size}\n")
+                        else:
+                            handler.write("#size=0\n")
+                            
+                        is_header_written[ch] = True
+                        
+                        # Determine dt based on the first buffer size
+                        if size < 8000:
+                            samples_per_div = 80
+                        elif size < 80000:
+                            samples_per_div = 800
+                        elif size < 800000:
+                            samples_per_div = 10000
+                        else:
+                            samples_per_div = 40000
+                        
+                        timebase_s = timebase * 1e-12
+                        dt[ch] = timebase_s / samples_per_div
+                        if dt[ch] > 0:
+                            t_thr, k = 1.0, 0
+                            while True:
+                                n = math.ceil(t_thr / dt[ch])
+                                _prec_steps[ch].append((n, k + 6))
+                                if n > 10 ** 15:
+                                    break
+                                t_thr *= 10.0
+                                k += 1
                     
-                    # Determine dt based on the first buffer size
-                    if size < 8000:
-                        samples_per_div = 80
-                    elif size < 80000:
-                        samples_per_div = 800
-                    elif size < 800000:
-                        samples_per_div = 10000
-                    else:
-                        samples_per_div = 40000
+                    # Write samples with continuously increasing timestamps
+                    chunk_lines = []
+                    for val in samples:
+                        total_samples_written[ch] += 1
+                        signed_val = val if val < 128 else val - 256
+                        t_val = total_samples_written[ch] * dt[ch]
+                        while _prec_idx[ch] < len(_prec_steps[ch]) and total_samples_written[ch] >= _prec_steps[ch][_prec_idx[ch]][0]:
+                            _t_decimals[ch] = _prec_steps[ch][_prec_idx[ch]][1]
+                            _prec_idx[ch] += 1
+                        t_str = f"{t_val:.{_t_decimals[ch]}E}"
+                        v_val = (signed_val / 25.0) * (voltbases.get(ch, 5000000) / 1000.0)
+                        v_str = f"{v_val:.3f}"
+                        chunk_lines.append(f"{t_str},{v_str}")
                     
-                    timebase_s = timebase * 1e-12
-                    dt = timebase_s / samples_per_div
-                    # sample-count thresholds
-                    # used to calculate minimum decimal places
-                    # required to preserve 1us or better resolution
-                    # as capture time goes by
-                    if dt > 0:
-                        t_thr, k = 1.0, 0
-                        while True:
-                            n = math.ceil(t_thr / dt)
-                            _prec_steps.append((n, k + 6))
-                            if n > 10 ** 15:
-                                break
-                            t_thr *= 10.0
-                            k += 1
+                    # Execute a single consolidated write call per capture
+                    handler.write("\n".join(chunk_lines) + "\n")
+                    if hasattr(handler, "flush"):
+                        handler.flush()
                 
-                # Write samples with continuously increasing timestamps
-                chunk_lines = []
-                for val in samples:
-                    total_samples_written += 1
-                    signed_val = val if val < 128 else val - 256
-                    t_val = total_samples_written * dt
-                    while _prec_idx < len(_prec_steps) and total_samples_written >= _prec_steps[_prec_idx][0]:
-                        _t_decimals = _prec_steps[_prec_idx][1]
-                        _prec_idx += 1
-                    t_str = f"{t_val:.{_t_decimals}E}"
-                    v_val = (signed_val / 25.0) * (voltbase / 1000.0)
-                    v_str = f"{v_val:.3f}"
-                    chunk_lines.append(f"{t_str},{v_str}")
-                
-                # Excecute a single consolidated write call per capture
-                handler.write("\n".join(chunk_lines) + "\n")
-                
-                handler.flush()
-                time.sleep(0.1)
+                # Sleep a tiny bit to avoid hammering the device too aggressively
+                time.sleep(0.05)
                 
         finally:
-            if size_pos is not None:
-                try:
-                    handler.seek(size_pos)
-                    handler.write(f"#size={total_samples_written:<10}\n")
-                    handler.flush()
-                except Exception as e:
-                    self.log.error("Failed to update CSV size header: %s", e)
-            if should_close:
-                handler.close()
+            for ch in channels:
+                handler = normalized_handlers[ch]
+                if size_pos[ch] is not None:
+                    try:
+                        handler.seek(size_pos[ch])
+                        handler.write(f"#size={total_samples_written[ch]:<10}\n")
+                        handler.flush()
+                    except Exception as e:
+                        self.log.error("Failed to update CSV size header for channel %d: %s", ch, e)
+            
+            for f in opened_handlers.values():
+                f.close()
+                
             self._streaming = False
+
