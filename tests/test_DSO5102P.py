@@ -507,5 +507,32 @@ class TestCSVStreamer(unittest.TestCase):
         self.assertFalse(dso._streaming)
 
 
+class TestGetCurrentSettingsAndLocking(unittest.TestCase):
+    def test_get_current_settings_parses_settings_correctly(self):
+        dso = _make_dso()
+        settings_payload = [0] * 208
+        settings_payload[1] = 11   # CH1 voltbase index 11 (5V / 5000000 uV)
+        settings_payload[5] = 1    # CH1 probe index 1 (x10) -> voltbase = 5000000 * 10 = 50000000 uV
+        settings_payload[11] = 9   # CH2 voltbase index 9 (1V / 1000000 uV)
+        settings_payload[15] = 0   # CH2 probe index 0 (x1) -> voltbase = 1000000 uV
+        settings_payload[160] = 18 # timebase index 18 (2ms / 2000000000 ps)
+        
+        dso.read_settings = MagicMock(return_value=settings_payload)
+        
+        res1 = dso.get_current_settings(channel=0)
+        self.assertEqual(res1["timebase"], 2000000000)
+        self.assertEqual(res1["voltbase"], 50000000) # 5V * 10 = 50V = 50,000,000 uV
+        
+        res2 = dso.get_current_settings(channel=1)
+        self.assertEqual(res2["timebase"], 2000000000)
+        self.assertEqual(res2["voltbase"], 1000000)  # 1V * 1 = 1V = 1,000,000 uV
+
+    def test_lock_exists_on_instance(self):
+        dso = _make_dso()
+        self.assertTrue(hasattr(dso, "_usb_lock"))
+        self.assertTrue(callable(getattr(dso._usb_lock, "acquire", None)))
+        self.assertTrue(callable(getattr(dso._usb_lock, "release", None)))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -127,6 +127,44 @@ async def websocket_endpoint(websocket: WebSocket):
                 print(f"Error during automatic stream cleanup: {e}", flush=True)
 
 
+@app.get("/api/settings")
+async def get_settings(channel: int = 0):
+    global dso
+    loop = asyncio.get_running_loop()
+    
+    # If a physical DSO is active, query it thread-safely in executor
+    if dso is not None:
+        try:
+            def query_active():
+                return dso.get_current_settings(channel=channel)
+            return await loop.run_in_executor(None, query_active)
+        except Exception as e:
+            print(f"Error reading active DSO settings: {e}", flush=True)
+            return {"status": "error", "message": str(e)}
+            
+    # If no active physical DSO, try opening one temporarily to read the settings
+    if DSO5102P is not None:
+        try:
+            def query_temp():
+                try:
+                    temp_dso = DSO5102P(0x049f, 0x505a, debug=False)
+                    res = temp_dso.get_current_settings(channel=channel)
+                    temp_dso.close()
+                    return res
+                except Exception as ex:
+                    return {"status": "error", "message": str(ex)}
+            res = await loop.run_in_executor(None, query_temp)
+            if isinstance(res, dict) and res.get("status") == "error":
+                # Fallback to mock settings if hardware not found/busy
+                return {"timebase": 2000000000, "voltbase": 5000000, "mock": True}
+            return res
+        except Exception as e:
+            print(f"Error querying temporary DSO settings: {e}", flush=True)
+            
+    # Mock fallback settings
+    return {"timebase": 2000000000, "voltbase": 5000000, "mock": True}
+
+
 @app.post("/api/live/start")
 async def live_start(channel: int = 0):
     global dso, live_streamer, mock_thread, mock_active

@@ -107,7 +107,7 @@ class OscilloscopeApp {
         this.recordBtn.addEventListener('click', () => this.onRecordBtnPressed());
         this.freezeBtn.addEventListener('click', () => this.toggleFreezeDisplay());
         this.playBtn.addEventListener('click', () => this.togglePlaybackPlay());
-        this.autocalBtn.addEventListener('click', () => this.autoCalibrate());
+        this.autocalBtn.addEventListener('click', () => this.autoCalibrate(true));
         
         // Horizontal calibration event listeners
         this.timeZoomOut.addEventListener('click', () => this.adjustTimebase(1));
@@ -353,6 +353,7 @@ class OscilloscopeApp {
                 this.isLiveStreaming = true;
                 this.statusText.textContent = "Streaming Live";
                 this.statusText.className = "status-ok";
+                this.autoCalibrate(false);
             };
             
             this.websocket.onmessage = (event) => {
@@ -693,36 +694,127 @@ class OscilloscopeApp {
         this.drawOscilloscope();
     }
     
-    autoCalibrate() {
-        if (this.voltageData.length === 0) return;
-        
-        let minV = Infinity;
-        let maxV = -Infinity;
-        let sumV = 0.0;
-        
-        for (let i = 0; i < this.voltageData.length; i++) {
-            const v = this.voltageData[i];
-            if (v < minV) minV = v;
-            if (v > maxV) maxV = v;
-            sumV += v;
+    async autoCalibrate(isButtonClick = false) {
+        if (this.mode === 'realtime') {
+            // In real-time (capture) mode: request actual settings from backend onstart and on button click
+            try {
+                const response = await fetch('/api/settings');
+                const settings = await response.json();
+                if (settings && (!settings.status || settings.status !== 'error')) {
+                    if (settings.timebase) {
+                        this.timebaseHeader = settings.timebase;
+                        const tbSeconds = settings.timebase * 1e-12;
+                        this.currentTimebaseIdx = this.findClosestIndex(tbSeconds, this.HORIZ_VALS);
+                    }
+                    if (settings.voltbase) {
+                        this.voltbaseHeader = settings.voltbase;
+                        const vbVolts = settings.voltbase * 1e-6;
+                        this.currentVoltbaseIdx = this.findClosestIndex(vbVolts, this.VERT_VALS);
+                    }
+                } else {
+                    throw new Error(settings ? settings.message : "Unknown error");
+                }
+            } catch (e) {
+                console.warn("Failed to fetch settings from backend, falling back to parsed stream headers:", e);
+                if (this.timebaseHeader) {
+                    const tbSeconds = this.timebaseHeader * 1e-12;
+                    this.currentTimebaseIdx = this.findClosestIndex(tbSeconds, this.HORIZ_VALS);
+                }
+                if (this.voltbaseHeader) {
+                    const vbVolts = this.voltbaseHeader * 1e-6;
+                    this.currentVoltbaseIdx = this.findClosestIndex(vbVolts, this.VERT_VALS);
+                }
+            }
+            this.verticalOffsetDiv = 0.0;
+            this.horizontalPosition = 0.0;
+        } else {
+            // In playback mode:
+            // 1. Timebase: set based on the CSV timebase
+            if (this.timebaseHeader) {
+                const tbSeconds = this.timebaseHeader * 1e-12;
+                this.currentTimebaseIdx = this.findClosestIndex(tbSeconds, this.HORIZ_VALS);
+            }
+            
+            // 2. Voltbase: set initially from voltbase; maximum displayed is only used on button click
+            if (isButtonClick) {
+                if (this.voltageData && this.voltageData.length > 0) {
+                    const timebase = this.HORIZ_VALS[this.currentTimebaseIdx];
+                    const screenDuration = timebase * 12;
+                    const startT = this.timeData[0];
+                    const endT = this.timeData[this.timeData.length - 1];
+                    const totalDuration = endT - startT;
+
+                    const viewportStartT = startT + (this.horizontalPosition * Math.max(0, totalDuration - screenDuration));
+                    const viewportEndT = viewportStartT + screenDuration;
+
+                    // Binary search for visible indices
+                    let startIndex = 0;
+                    let endIndex = this.timeData.length - 1;
+
+                    let low = 0, high = this.timeData.length - 1;
+                    while (low <= high) {
+                        const mid = (low + high) >> 1;
+                        if (this.timeData[mid] < viewportStartT) {
+                            startIndex = mid;
+                            low = mid + 1;
+                        } else {
+                            high = mid - 1;
+                        }
+                    }
+
+                    low = 0; high = this.timeData.length - 1;
+                    while (low <= high) {
+                        const mid = (low + high) >> 1;
+                        if (this.timeData[mid] <= viewportEndT) {
+                            endIndex = mid;
+                            low = mid + 1;
+                        } else {
+                            high = mid - 1;
+                        }
+                    }
+
+                    // Find max absolute voltage within the visible viewport slice
+                    let maxAbs = 0.0;
+                    for (let i = startIndex; i <= endIndex; i++) {
+                        const absVal = Math.abs(this.voltageData[i]);
+                        if (absVal > maxAbs) {
+                            maxAbs = absVal;
+                        }
+                    }
+                    
+                    if (maxAbs < 0.001 && this.voltbaseHeader) {
+                        // Fall back to CSV voltbase if flat/noise
+                        const vbVolts = this.voltbaseHeader * 1e-6;
+                        this.currentVoltbaseIdx = this.findClosestIndex(vbVolts, this.VERT_VALS);
+                    } else {
+                        // Find lowest voltbase that satisfies: voltbase * 5.0 >= maxAbs, so voltbase >= maxAbs / 5.0
+                        const targetMinVoltbase = maxAbs / 5.0;
+                        let chosenIdx = 0;
+                        for (let k = 0; k < this.VERT_VALS.length; k++) {
+                            if (this.VERT_VALS[k] >= targetMinVoltbase) {
+                                chosenIdx = k;
+                                break;
+                            }
+                            chosenIdx = k;
+                        }
+                        this.currentVoltbaseIdx = chosenIdx;
+                    }
+                } else if (this.voltbaseHeader) {
+                    const vbVolts = this.voltbaseHeader * 1e-6;
+                    this.currentVoltbaseIdx = this.findClosestIndex(vbVolts, this.VERT_VALS);
+                }
+            } else {
+                // Initial load: set vertical adjustment from voltbase header value
+                if (this.voltbaseHeader) {
+                    const vbVolts = this.voltbaseHeader * 1e-6;
+                    this.currentVoltbaseIdx = this.findClosestIndex(vbVolts, this.VERT_VALS);
+                }
+            }
+            
+            this.verticalOffsetDiv = 0.0;
+            this.horizontalPosition = 0.0;
         }
         
-        const avgV = sumV / this.voltageData.length;
-        const peakToPeak = maxV - minV;
-        
-        const desiredVoltbase = (peakToPeak === 0 ? 1.0 : peakToPeak) / 6.0;
-        this.currentVoltbaseIdx = this.findClosestIndex(desiredVoltbase, this.VERT_VALS);
-        
-        this.verticalOffsetDiv = -avgV / this.VERT_VALS[this.currentVoltbaseIdx];
-        this.verticalOffsetDiv = Math.max(-5, Math.min(5, this.verticalOffsetDiv));
-        
-        if (this.timeData.length > 1) {
-            const totalDuration = this.timeData[this.timeData.length - 1] - this.timeData[0];
-            const desiredTimebase = totalDuration / 12.0;
-            this.currentTimebaseIdx = this.findClosestIndex(desiredTimebase, this.HORIZ_VALS);
-        }
-        
-        this.horizontalPosition = 0;
         this.updateSlidersAndReadouts();
         this.drawOscilloscope();
     }

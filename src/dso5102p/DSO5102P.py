@@ -26,6 +26,7 @@ class DSO5102P:
     def __init__(self, id_vendor=0x049f, id_product=0x505a, debug=False):
         self.log = logging.getLogger("DSO5102P")
         self.debug = debug
+        self._usb_lock = threading.Lock()
         if self.debug:
             self.log.setLevel(logging.DEBUG)
         else:
@@ -108,32 +109,34 @@ class DSO5102P:
         return list(r[4:-1])
 
     def read_settings(self):
-        self._send_command('ReadSettings', 0x01, array.array('B'))
-        r = self._read_answer('ReadSettings', 0x81)
-        return r[4:-1]
+        with self._usb_lock:
+            self._send_command('ReadSettings', 0x01, array.array('B'))
+            r = self._read_answer('ReadSettings', 0x81)
+            return r[4:-1]
 
     def read_sample_data(self, channel):
-        self._send_command('ReadSampleData', 0x02, array.array('B', [0x01, channel & 0x01]))
-        r = array.array('B')
-        has_data = False
-        while True:
-            d = self._read_answer('ReadSampleData', 0x82)
-            subcmd = d[4]
-            if subcmd == 0x00:
-                if has_data:
-                    # Legacy behavior/test support
+        with self._usb_lock:
+            self._send_command('ReadSampleData', 0x02, array.array('B', [0x01, channel & 0x01]))
+            r = array.array('B')
+            has_data = False
+            while True:
+                d = self._read_answer('ReadSampleData', 0x82)
+                subcmd = d[4]
+                if subcmd == 0x00:
+                    if has_data:
+                        # Legacy behavior/test support
+                        break
+                    else:
+                        # Real protocol header, skip/ignore
+                        continue
+                elif subcmd == 0x01:
+                    r = r + d[6:-1]
+                    has_data = True
+                elif subcmd in (0x02, 0x03):
                     break
                 else:
-                    # Real protocol header, skip/ignore
-                    continue
-            elif subcmd == 0x01:
-                r = r + d[6:-1]
-                has_data = True
-            elif subcmd in (0x02, 0x03):
-                break
-            else:
-                break
-        return r
+                    break
+            return r
 
     def read_file(self, fname):
         self._send_command('ReadFile', 0x10, array.array('B', bytearray('\x00' + fname, 'utf8')))
@@ -193,6 +196,44 @@ class DSO5102P:
         r = self._read_answer('RemoteShell', 0x91)
         r = ''.join([chr(c) for c in r])
         return r
+
+    def get_current_settings(self, channel=0):
+        settings = self.read_settings()
+        ch1_voltbase = 5000000
+        ch2_voltbase = 5000000
+        timebase = 2000000000
+        
+        VERT_VALS = [
+            1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000,
+            1000000, 2000000, 5000000, 10000000
+        ]
+        HORIZ_VALS = [
+            2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000,
+            1000000, 2000000, 5000000, 10000000, 20000000, 50000000, 100000000, 200000000, 500000000,
+            1000000000, 2000000000, 5000000000, 10000000000, 20000000000, 50000000000, 100000000000, 200000000000, 500000000000,
+            1000000000000, 2000000000000, 5000000000000, 10000000000000, 20000000000000, 50000000000000
+        ]
+        PROBE_MULTIPLIERS = [1, 10, 100, 1000]
+        
+        if len(settings) >= 161:
+            ch1_vb_idx = settings[1]
+            ch1_probe_idx = settings[5]
+            ch2_vb_idx = settings[11]
+            ch2_probe_idx = settings[15]
+            tb_idx = settings[160]
+            
+            ch1_probe_mult = PROBE_MULTIPLIERS[ch1_probe_idx] if ch1_probe_idx < len(PROBE_MULTIPLIERS) else 1
+            ch2_probe_mult = PROBE_MULTIPLIERS[ch2_probe_idx] if ch2_probe_idx < len(PROBE_MULTIPLIERS) else 1
+            
+            if ch1_vb_idx < len(VERT_VALS):
+                ch1_voltbase = VERT_VALS[ch1_vb_idx] * ch1_probe_mult
+            if ch2_vb_idx < len(VERT_VALS):
+                ch2_voltbase = VERT_VALS[ch2_vb_idx] * ch2_probe_mult
+            if tb_idx < len(HORIZ_VALS):
+                timebase = HORIZ_VALS[tb_idx]
+                
+        voltbase = ch2_voltbase if (channel & 0x01) == 1 else ch1_voltbase
+        return {"timebase": timebase, "voltbase": voltbase}
 
     def start(self, file_handler=None, capture_duration_s=None, channel=0):
         """
