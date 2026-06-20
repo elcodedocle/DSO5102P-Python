@@ -1,24 +1,31 @@
 # DSO5102P-Python
  Access to the Hantek DSO5102P oscilloscope from Python 3.x
 
-See this sites for details:
+See these sites for details:
 * https://web.archive.org/web/20241012215844/https://elinux.org/Das_Oszi_Protocol
 * https://web.archive.org/web/20221013121459/https://randomprojects.org/wiki/Voltcraft_DSO-3062C
 
-<img src="./screenshot/2019-05-05 11:58:17.png" alt="Screenshot" />
+![Screenshot](support/img/2019-05-05_115817.png)
 
-My Hantek DSO5102P reports VID:PID as 049f:505a so I added the file ``99-dso5102P.rules`` to ``/lib/udev/rules.d/`` (or to ``/etc/udev/rules.d/``)
+My Hantek DSO5102P reports VID:PID as 049f:505a so I added the file ``99-dso5102P.rules`` to ``/lib/udev/rules.d/``
+(or to ``/etc/udev/rules.d/``)
 
-    SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="049f", ATTR{idProduct}=="505a", MODE="0666"
+```text
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="049f", ATTR{idProduct}=="505a", MODE="0666"
+```
 
 and reload udev rules with
 
-    $ sudo udevadm control --reload-rules
-    $ sudo udevadm trigger
+```bash
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
 
 For MacOS, make sure libusb is available in `/opt/homebrew/lib/libusb-1.0.dylib`:
 
-    $ brew install libusb
+```bash
+brew install libusb
+```
 
 Implemented and tested functions:
 * Echo: send data bytes a returned unchanged
@@ -29,7 +36,25 @@ Implemented and tested functions:
 * Screenshot: get a screenshot from the DSO (no color palette information)
 * ReadSystemTime: read the DSO's system time
 * RemoteShell: run shell commands in the DSO
-
-Implemented and not tested functions:
 * ReadSettings: read current DSO settings
-* ReadSampleData: read sample data from the DSO CH1/CH2
+* ReadSampleData: read the DSO's current probe data stream for the given channel
+
+## Web oscilloscope
+
+Uses FastAPI and websockets to stream chunks of ReadSampleData to a nice web GUI with some processing (Triggers, FFT,
+(split) display and playback controls, and a MATH virtual channel). No fancy webgl shaders/rasterization rendering; Just
+a regular HTML canvas.
+
+![web_oscilloscope.png](support/img/web_oscilloscope.png)
+
+Because it tries to read and process into CSV records and stream to the client at about 1MS/s per channel, it is pretty
+resource intensive. Then the client has to parse that stuff and display and store it. Several optimizations are applied,
+but don't count on it working too well on a thin client over a choppy WiFi. Best used on a capable laptop running both
+the server and localhost client. Or just capture first, then replay it offline in playback mode in a capable enough
+machine.
+
+```bash
+pip install -r examples/web_oscilloscope/requirements.txt # (or equivalent for your venv)
+python examples/web_oscilloscope/app.py # (or equivalent for your venv)
+open http://localhost:8000 # (or equivalent for your os)
+```

@@ -4,7 +4,52 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hantek DSO5102P Oscilloscope Viewer</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=2">
+    <style>
+        /* Bulletproof styles for vertical channel tab buttons */
+        .tab-btn {
+            flex: 1 !important;
+            background: none !important;
+            border: none !important;
+            border-bottom: 2px solid transparent !important;
+            color: #888 !important;
+            padding: 6px !important;
+            font-size: 11px !important;
+            font-weight: 700 !important;
+            cursor: pointer !important;
+            border-radius: 3px !important;
+            transition: all 0.2s !important;
+        }
+
+        .tab-btn:hover {
+            color: #ffffff !important;
+            background-color: #1a1a1a !important;
+        }
+
+        #tab-ch1.tab-btn.active {
+            color: #00ff66 !important;
+            border-bottom: 2px solid #00ff66 !important;
+            text-shadow: 0 0 8px rgba(0, 255, 102, 0.6) !important;
+            box-shadow: inset 0 -4px 10px rgba(0, 255, 102, 0.05) !important;
+            background-color: rgba(0, 255, 102, 0.12) !important;
+        }
+
+        #tab-ch2.tab-btn.active {
+            color: #00e5ff !important;
+            border-bottom: 2px solid #00e5ff !important;
+            text-shadow: 0 0 8px rgba(0, 229, 255, 0.6) !important;
+            box-shadow: inset 0 -4px 10px rgba(0, 229, 255, 0.05) !important;
+            background-color: rgba(0, 229, 255, 0.12) !important;
+        }
+
+        #tab-math.tab-btn.active {
+            color: #bd00ff !important;
+            border-bottom: 2px solid #bd00ff !important;
+            text-shadow: 0 0 8px rgba(189, 0, 255, 0.6) !important;
+            box-shadow: inset 0 -4px 10px rgba(189, 0, 255, 0.05) !important;
+            background-color: rgba(189, 0, 255, 0.12) !important;
+        }
+    </style>
 </head>
 <body>
     <div class="app-container">
@@ -116,13 +161,14 @@
                     </div>
                 </div>
 
+                <div class="tab-strip" style="display: flex; gap: 4px; background-color: #111; padding: 4px; border-radius: 4px; margin-bottom: 12px;">
+                    <button id="tab-ch1" class="tab-btn active">CH1</button>
+                    <button id="tab-ch2" class="tab-btn">CH2</button>
+                    <button id="tab-math" class="tab-btn">MATH</button>
+                </div>
+
                 <div class="section-title">VERTICAL CONTROLS</div>
-                <div class="calibration-section">
-                    <div class="tab-strip" style="display: flex; gap: 4px; background-color: #111; padding: 4px; border-radius: 4px; margin-bottom: 12px;">
-                        <button id="tab-ch1" class="tab-btn active" style="flex: 1; background: none; border: none; color: #888; padding: 6px; font-size: 11px; font-weight: 700; cursor: pointer; border-radius: 3px; transition: all 0.2s;">CH1</button>
-                        <button id="tab-ch2" class="tab-btn" style="flex: 1; background: none; border: none; color: #888; padding: 6px; font-size: 11px; font-weight: 700; cursor: pointer; border-radius: 3px; transition: all 0.2s;">CH2</button>
-                        <button id="tab-math" class="tab-btn" style="flex: 1; background: none; border: none; color: #888; padding: 6px; font-size: 11px; font-weight: 700; cursor: pointer; border-radius: 3px; transition: all 0.2s;">MATH</button>
-                    </div>
+                <div id="vertical-calibration-section" class="calibration-section active-ch1">
                     
                     <div class="knob-control hide" id="math-op-control" style="margin-bottom: 12px;">
                         <label>Math Operation</label>
@@ -169,7 +215,7 @@
                 </div>
 
                 <div class="section-title">TRIGGER CONTROLS</div>
-                <div class="calibration-section">
+                <div id="trigger-calibration-section" class="calibration-section active-ch1">
                     <div class="knob-control checkbox-control">
                         <label class="checkbox-label">
                             <input type="checkbox" id="trigger-enable">
@@ -186,7 +232,7 @@
                     </div>
                     
                     <div class="knob-control">
-                        <label>Low Threshold (V_low)</label>
+                        <label id="trigger-low-label">Low Threshold (V_low)</label>
                         <input type="range" id="trigger-low" class="slider" min="-125" max="125" value="-25">
                         <div class="offset-vals">
                             <span>-5 div</span>
@@ -196,12 +242,40 @@
                     </div>
                     
                     <div class="knob-control">
-                        <label>High Threshold (V_high)</label>
+                        <label id="trigger-high-label">High Threshold (V_high)</label>
                         <input type="range" id="trigger-high" class="slider" min="-125" max="125" value="25">
                         <div class="offset-vals">
                             <span>-5 div</span>
                             <span id="trigger-high-val">+1.000 V</span>
                             <span>+5 div</span>
+                        </div>
+                    </div>
+
+                    <div class="knob-control hide" id="trigger-fft-range-group" style="border-top: 1px solid #2a2a2a; padding-top: 12px;">
+                        <div style="margin-bottom: 12px;">
+                            <label>FFT Start Frequency (f_low)</label>
+                            <input type="range" id="trigger-freq-low" class="slider" min="0" max="1000" value="100">
+                            <div class="scroll-vals">
+                                <span>0 Hz</span>
+                                <span id="trigger-freq-low-val">100 Hz</span>
+                                <span id="trigger-freq-low-max">20 kHz</span>
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 12px;">
+                            <label>FFT End Frequency (f_high)</label>
+                            <input type="range" id="trigger-freq-high" class="slider" min="0" max="1000" value="500">
+                            <div class="scroll-vals">
+                                <span>0 Hz</span>
+                                <span id="trigger-freq-high-val">500 Hz</span>
+                                <span id="trigger-freq-high-max">20 kHz</span>
+                            </div>
+                        </div>
+                        <div>
+                            <label>FFT Range Match Logic</label>
+                            <select id="trigger-fft-logic" style="width: 100%;">
+                                <option value="any" selected>Any bin in range (OR)</option>
+                                <option value="all">All bins in range (AND)</option>
+                            </select>
                         </div>
                     </div>
 
@@ -282,6 +356,6 @@
     </dialog>
 
     <a id="download-link" style="display: none;"></a>
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=2"></script>
 </body>
 </html>

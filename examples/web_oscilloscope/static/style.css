@@ -374,7 +374,17 @@ select:focus {
 
 /* Active channel tab colors and glowing borders */
 .tab-btn {
+    flex: 1;
+    background: none;
+    border: none;
     border-bottom: 2px solid transparent !important;
+    color: #888;
+    padding: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.2s;
 }
 
 .tab-btn:hover {
@@ -391,6 +401,7 @@ select:focus {
     border-bottom: 2px solid #00ff66 !important;
     text-shadow: 0 0 8px rgba(0, 255, 102, 0.4);
     box-shadow: inset 0 -4px 10px rgba(0, 255, 102, 0.05);
+    background-color: rgba(0, 255, 102, 0.12) !important;
 }
 
 #tab-ch2.tab-btn.active {
@@ -398,6 +409,7 @@ select:focus {
     border-bottom: 2px solid #00e5ff !important;
     text-shadow: 0 0 8px rgba(0, 229, 255, 0.4);
     box-shadow: inset 0 -4px 10px rgba(0, 229, 255, 0.05);
+    background-color: rgba(0, 229, 255, 0.12) !important;
 }
 
 #tab-math.tab-btn.active {
@@ -405,6 +417,7 @@ select:focus {
     border-bottom: 2px solid #bd00ff !important;
     text-shadow: 0 0 8px rgba(189, 0, 255, 0.4);
     box-shadow: inset 0 -4px 10px rgba(189, 0, 255, 0.05);
+    background-color: rgba(189, 0, 255, 0.12) !important;
 }
 
 /* Gear Button rotation and hover */
@@ -442,4 +455,25 @@ select:focus {
 ::-webkit-scrollbar-thumb:hover {
     background: #444;
 }
+
+/* Active vertical channel indicator highlights */
+.calibration-section {
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.calibration-section.active-ch1 {
+    border-color: #00ff66 !important;
+    box-shadow: 0 0 12px rgba(0, 255, 102, 0.15), inset 0 0 6px rgba(0, 255, 102, 0.05);
+}
+
+.calibration-section.active-ch2 {
+    border-color: #00e5ff !important;
+    box-shadow: 0 0 12px rgba(0, 229, 255, 0.15), inset 0 0 6px rgba(0, 229, 255, 0.05);
+}
+
+.calibration-section.active-math {
+    border-color: #bd00ff !important;
+    box-shadow: 0 0 12px rgba(189, 0, 255, 0.15), inset 0 0 6px rgba(189, 0, 255, 0.05);
+}
+
 

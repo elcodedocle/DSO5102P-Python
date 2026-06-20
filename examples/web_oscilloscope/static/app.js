@@ -174,6 +174,20 @@ class OscilloscopeApp {
         this.postTriggerVal = document.getElementById('post-trigger-val');
         this.postTriggerAuto = document.getElementById('post-trigger-auto');
         
+        // FFT Frequency Range trigger UI controls
+        this.verticalCalibrationSection = document.getElementById('vertical-calibration-section');
+        this.triggerCalibrationSection = document.getElementById('trigger-calibration-section');
+        this.triggerLowLabel = document.getElementById('trigger-low-label');
+        this.triggerHighLabel = document.getElementById('trigger-high-label');
+        this.triggerFFTRangeGroup = document.getElementById('trigger-fft-range-group');
+        this.triggerFreqLow = document.getElementById('trigger-freq-low');
+        this.triggerFreqLowVal = document.getElementById('trigger-freq-low-val');
+        this.triggerFreqLowMax = document.getElementById('trigger-freq-low-max');
+        this.triggerFreqHigh = document.getElementById('trigger-freq-high');
+        this.triggerFreqHighVal = document.getElementById('trigger-freq-high-val');
+        this.triggerFreqHighMax = document.getElementById('trigger-freq-high-max');
+        this.triggerFFTLogic = document.getElementById('trigger-fft-logic');
+        
         // Trigger State (Per-channel dictionaries)
         this.triggerEnabled = { 'CH1': false, 'CH2': false, 'MATH': false };
         this.triggerActionVal = { 'CH1': 'pause', 'CH2': 'pause', 'MATH': 'pause' };
@@ -183,6 +197,9 @@ class OscilloscopeApp {
         this.triggerMinTimeSec = { 'CH1': 0.0, 'CH2': 0.0, 'MATH': 0.0 };
         this.triggerPostDelayVal = { 'CH1': 1600, 'CH2': 1600, 'MATH': 1600 };
         this.triggerPostAuto = { 'CH1': true, 'CH2': true, 'MATH': true };
+        this.triggerFreqLowHz = { 'CH1': 100.0, 'CH2': 150.0, 'MATH': 120.0 };
+        this.triggerFreqHighHz = { 'CH1': 1000.0, 'CH2': 1500.0, 'MATH': 1200.0 };
+        this.triggerFFTMatchLogic = { 'CH1': 'any', 'CH2': 'any', 'MATH': 'any' };
         
         // Active Firing & Detection State (Global & tracking source)
         this.isTriggered = false;
@@ -283,6 +300,11 @@ class OscilloscopeApp {
         this.postTriggerDelay.addEventListener('input', (e) => this.onPostTriggerDelayChange(e.target.value));
         this.postTriggerAuto.addEventListener('change', (e) => this.onPostTriggerAutoChange(e.target.checked));
         
+        // FFT Range Trigger controls listeners
+        this.triggerFreqLow.addEventListener('input', (e) => this.onTriggerFreqLowChange(e.target.value));
+        this.triggerFreqHigh.addEventListener('input', (e) => this.onTriggerFreqHighChange(e.target.value));
+        this.triggerFFTLogic.addEventListener('change', (e) => this.onTriggerFFTLogicChange(e.target.value));
+        
         // Load default mock waveforms on startup
         this.loadDefaultMockWaveforms();
         
@@ -305,6 +327,14 @@ class OscilloscopeApp {
         this.tabCh1.className = 'tab-btn' + (channel === 'CH1' ? ' active' : '');
         this.tabCh2.className = 'tab-btn' + (channel === 'CH2' ? ' active' : '');
         this.tabMath.className = 'tab-btn' + (channel === 'MATH' ? ' active' : '');
+        
+        // Update vertical and trigger panel highlights dynamically
+        if (this.verticalCalibrationSection) {
+            this.verticalCalibrationSection.className = 'calibration-section active-' + channel.toLowerCase();
+        }
+        if (this.triggerCalibrationSection) {
+            this.triggerCalibrationSection.className = 'calibration-section active-' + channel.toLowerCase();
+        }
         
         // Show/hide Math operation select
         if (channel === 'MATH') {
@@ -912,19 +942,31 @@ class OscilloscopeApp {
         
         // 1. Evaluate CH1 trigger if enabled and channel is 1
         if (channel === 1 && this.triggerEnabled['CH1']) {
-            this.checkChannelTrigger('CH1', newPoints, this.timeData1, this.voltageData1);
+            if (this.fftEnabledCh1) {
+                this.checkFFTChannelTrigger('CH1', this.timeData1, this.voltageData1, false, null, null);
+            } else {
+                this.checkChannelTrigger('CH1', newPoints, this.timeData1, this.voltageData1);
+            }
             if (this.isTriggered) return;
         }
         
         // 2. Evaluate CH2 trigger if enabled and channel is 2
         if (channel === 2 && this.triggerEnabled['CH2']) {
-            this.checkChannelTrigger('CH2', newPoints, this.timeData2, this.voltageData2);
+            if (this.fftEnabledCh2) {
+                this.checkFFTChannelTrigger('CH2', this.timeData2, this.voltageData2, false, null, null);
+            } else {
+                this.checkChannelTrigger('CH2', newPoints, this.timeData2, this.voltageData2);
+            }
             if (this.isTriggered) return;
         }
         
         // 3. Evaluate MATH trigger if enabled and channel is 1 (MATH runs on CH1 updates)
         if (channel === 1 && this.triggerEnabled['MATH'] && this.mathEnable.checked && this.timeDataMath.length >= newPoints) {
-            this.checkChannelTrigger('MATH', newPoints, this.timeDataMath, this.voltageDataMath);
+            if (this.fftEnabledMath) {
+                this.checkFFTChannelTrigger('MATH', this.timeDataMath, this.voltageDataMath, false, null, null);
+            } else {
+                this.checkChannelTrigger('MATH', newPoints, this.timeDataMath, this.voltageDataMath);
+            }
         }
     }
     
@@ -1068,15 +1110,27 @@ class OscilloscopeApp {
     evaluatePlaybackTriggers(viewportStartT, viewportEndT) {
         if (this.isTriggered) return;
         if (this.triggerEnabled['CH1'] && this.ch1Enable.checked && this.timeData1.length > 0) {
-            this.checkPlaybackChannelTrigger('CH1', this.timeData1, this.voltageData1, viewportStartT, viewportEndT);
+            if (this.fftEnabledCh1) {
+                this.checkFFTChannelTrigger('CH1', this.timeData1, this.voltageData1, true, viewportStartT, viewportEndT);
+            } else {
+                this.checkPlaybackChannelTrigger('CH1', this.timeData1, this.voltageData1, viewportStartT, viewportEndT);
+            }
             if (this.isTriggered) return;
         }
         if (this.triggerEnabled['CH2'] && this.ch2Enable.checked && this.timeData2.length > 0) {
-            this.checkPlaybackChannelTrigger('CH2', this.timeData2, this.voltageData2, viewportStartT, viewportEndT);
+            if (this.fftEnabledCh2) {
+                this.checkFFTChannelTrigger('CH2', this.timeData2, this.voltageData2, true, viewportStartT, viewportEndT);
+            } else {
+                this.checkPlaybackChannelTrigger('CH2', this.timeData2, this.voltageData2, viewportStartT, viewportEndT);
+            }
             if (this.isTriggered) return;
         }
         if (this.triggerEnabled['MATH'] && this.mathEnable.checked && this.timeDataMath.length > 0) {
-            this.checkPlaybackChannelTrigger('MATH', this.timeDataMath, this.voltageDataMath, viewportStartT, viewportEndT);
+            if (this.fftEnabledMath) {
+                this.checkFFTChannelTrigger('MATH', this.timeDataMath, this.voltageDataMath, true, viewportStartT, viewportEndT);
+            } else {
+                this.checkPlaybackChannelTrigger('MATH', this.timeDataMath, this.voltageDataMath, viewportStartT, viewportEndT);
+            }
         }
     }
     
@@ -1113,6 +1167,144 @@ class OscilloscopeApp {
                     break;
                 }
             } else { consec = 0; triggerT = null; }
+        }
+    }
+    
+    checkFFTChannelTrigger(chKey, timeArray, voltArray, isPlayback, viewportStartT, viewportEndT) {
+        if (this.isTriggered) return;
+        if (timeArray.length < 16) return;
+
+        const timebase = this.HORIZ_VALS[this.currentTimebaseIdx];
+        const screenDuration = timebase * 12; // 12 divs total horizontal
+
+        const startT = timeArray[0];
+        const endT = timeArray[timeArray.length - 1];
+        const totalDuration = endT - startT;
+
+        if (viewportStartT === null || viewportStartT === undefined) {
+            if (this.mode === 'realtime') {
+                viewportEndT = endT;
+                viewportStartT = Math.max(startT, endT - screenDuration);
+            } else {
+                viewportStartT = startT + (this.horizontalPosition * Math.max(0, totalDuration - screenDuration));
+                viewportEndT = viewportStartT + screenDuration;
+            }
+        }
+
+        // Find visible sample boundaries via Binary Search
+        let startIndex = 0;
+        let endIndex = timeArray.length - 1;
+
+        let low = 0, high = timeArray.length - 1;
+        while (low <= high) {
+            const mid = (low + high) >> 1;
+            if (timeArray[mid] < viewportStartT) {
+                startIndex = mid;
+                low = mid + 1;
+            } else {
+                high = mid - 1;
+            }
+        }
+
+        low = 0; high = timeArray.length - 1;
+        while (low <= high) {
+            const mid = (low + high) >> 1;
+            if (timeArray[mid] <= viewportEndT) {
+                endIndex = mid;
+                low = mid + 1;
+            } else {
+                high = mid - 1;
+            }
+        }
+
+        const visibleCount = endIndex - startIndex + 1;
+        if (visibleCount < 16) return;
+
+        // Resolve sampling dt
+        const avg_dt = (endT - startT) / (timeArray.length - 1);
+
+        // Slice real voltages
+        const sliceReal = voltArray.subarray ? voltArray.subarray(startIndex, endIndex + 1) : voltArray.slice(startIndex, endIndex + 1);
+        const fftResult = this.computeFFTSpectrum(sliceReal, avg_dt);
+        if (!fftResult) return;
+
+        const { frequencies, magnitudes } = fftResult;
+        const numBins = magnitudes.length;
+        if (numBins <= 0) return;
+
+        // Find all bin indices within [triggerFreqLowHz, triggerFreqHighHz]
+        const freqLow = this.triggerFreqLowHz[chKey];
+        const freqHigh = this.triggerFreqHighHz[chKey];
+        const logic = this.triggerFFTMatchLogic[chKey] || 'any';
+
+        const binsInRange = [];
+        for (let k = 0; k < numBins; k++) {
+            if (frequencies[k] >= freqLow && frequencies[k] <= freqHigh) {
+                binsInRange.push(k);
+            }
+        }
+
+        // If no bins fall in range, condition is not met
+        let conditionMet = false;
+        if (binsInRange.length > 0) {
+            const lowL = this.triggerLowVolts[chKey];
+            const highL = this.triggerHighVolts[chKey];
+
+            if (logic === 'all') {
+                // All bins in range must exceed or drop below thresholds
+                conditionMet = binsInRange.every(k => {
+                    const mag = magnitudes[k];
+                    return mag < lowL || mag > highL;
+                });
+            } else {
+                // Any bin in range satisfies (OR logic)
+                conditionMet = binsInRange.some(k => {
+                    const mag = magnitudes[k];
+                    return mag < lowL || mag > highL;
+                });
+            }
+        }
+
+        const currentT = timeArray[endIndex]; // use the end of the viewport slice as current timestamp
+        const minSamples = this.triggerMinSamples[chKey];
+        const minTime = this.triggerMinTimeSec[chKey];
+
+        if (conditionMet) {
+            if (this.triggerStartTime[chKey] === null) {
+                this.triggerStartTime[chKey] = currentT;
+            }
+            this.consecutiveOutsideSamples[chKey]++;
+            const duration = currentT - this.triggerStartTime[chKey];
+
+            if (this.consecutiveOutsideSamples[chKey] >= minSamples && duration >= minTime) {
+                this.isTriggered = true;
+                this.triggerSourceChannel = chKey;
+
+                if (isPlayback) {
+                    this.playbackPlaying = false;
+                    this.playBtn.textContent = "Play";
+                    this.playBtn.className = "btn btn-green";
+                    this.statusText.textContent = `Triggered: ${chKey} (Playback Paused)`;
+                    this.statusText.className = "status-wait";
+                    this.drawOscilloscope();
+                } else {
+                    if (this.triggerActionVal[chKey] === 'pause') {
+                        this.displayFrozen = true;
+                        this.freezeBtn.textContent = "Unfreeze Display";
+                        this.freezeBtn.className = "btn btn-red";
+                        this.statusText.textContent = `Triggered: ${chKey} (Frozen)`;
+                        this.statusText.className = "status-wait";
+                        this.drawOscilloscope();
+                    } else {
+                        this.postTriggerCounter[chKey] = 0;
+                        this.statusText.textContent = `Triggered: ${chKey}! Capturing post...`;
+                        this.statusText.className = "status-wait";
+                    }
+                }
+            }
+        } else {
+            this.consecutiveOutsideSamples[chKey] = 0;
+            this.triggerStartTime[chKey] = null;
         }
     }
     
@@ -1247,6 +1439,54 @@ class OscilloscopeApp {
         this.updateSlidersAndReadouts();
     }
     
+    getNyquistFrequency(tab) {
+        let dt = 2.5e-5; // default fallback (40kHz sample rate -> 20kHz Nyquist)
+        const timeData = tab === 'CH1' ? this.timeData1 : (tab === 'CH2' ? this.timeData2 : this.timeDataMath);
+        if (timeData && timeData.length > 1) {
+            dt = (timeData[timeData.length - 1] - timeData[0]) / (timeData.length - 1);
+        } else {
+            const anyData = this.timeData1.length > 1 ? this.timeData1 : this.timeData2;
+            if (anyData.length > 1) {
+                dt = (anyData[anyData.length - 1] - anyData[0]) / (anyData.length - 1);
+            }
+        }
+        return dt > 0 ? 0.5 / dt : 20000;
+    }
+
+    onTriggerFreqLowChange(value) {
+        const tab = this.activeTab;
+        const nyquist = this.getNyquistFrequency(tab);
+        const sliderPercent = parseInt(value) / 1000;
+        this.triggerFreqLowHz[tab] = sliderPercent * nyquist;
+        
+        // Keep triggerFreqHighHz >= triggerFreqLowHz
+        if (this.triggerFreqHighHz[tab] < this.triggerFreqLowHz[tab]) {
+            this.triggerFreqHighHz[tab] = this.triggerFreqLowHz[tab];
+        }
+        
+        this.updateSlidersAndReadouts();
+    }
+
+    onTriggerFreqHighChange(value) {
+        const tab = this.activeTab;
+        const nyquist = this.getNyquistFrequency(tab);
+        const sliderPercent = parseInt(value) / 1000;
+        this.triggerFreqHighHz[tab] = sliderPercent * nyquist;
+        
+        // Keep triggerFreqLowHz <= triggerFreqHighHz
+        if (this.triggerFreqLowHz[tab] > this.triggerFreqHighHz[tab]) {
+            this.triggerFreqLowHz[tab] = this.triggerFreqHighHz[tab];
+        }
+        
+        this.updateSlidersAndReadouts();
+    }
+
+    onTriggerFFTLogicChange(value) {
+        const tab = this.activeTab;
+        this.triggerFFTMatchLogic[tab] = value;
+        this.resetTriggerState();
+    }
+    
     resetTriggerState() {
         this.isTriggered = false;
         this.triggerSourceChannel = null;
@@ -1349,8 +1589,54 @@ class OscilloscopeApp {
         
         this.triggerLow.value = Math.round(this.triggerLowDiv[tab] * 25);
         this.triggerHigh.value = Math.round(this.triggerHighDiv[tab] * 25);
-        this.triggerLowVal.textContent = `${activeLowVolts.toFixed(3)} V`;
-        this.triggerHighVal.textContent = `${activeHighVolts.toFixed(3)} V`;
+        
+        // Dynamically adjust labels, units, and slider visibility based on FFT mode
+        if (isFFT) {
+            if (this.triggerFFTRangeGroup) this.triggerFFTRangeGroup.classList.remove('hide');
+            
+            const nyquist = this.getNyquistFrequency(tab);
+            const formattedMax = this.formatFreq(nyquist);
+            if (this.triggerFreqLowMax) this.triggerFreqLowMax.textContent = formattedMax;
+            if (this.triggerFreqHighMax) this.triggerFreqHighMax.textContent = formattedMax;
+            
+            // Clamp and sync values
+            if (this.triggerFreqLowHz[tab] > nyquist) this.triggerFreqLowHz[tab] = nyquist;
+            if (this.triggerFreqHighHz[tab] > nyquist) this.triggerFreqHighHz[tab] = nyquist;
+            
+            if (this.triggerFreqLow) {
+                this.triggerFreqLow.value = Math.round((this.triggerFreqLowHz[tab] / nyquist) * 1000);
+            }
+            if (this.triggerFreqLowVal) {
+                this.triggerFreqLowVal.textContent = this.formatFreq(this.triggerFreqLowHz[tab]);
+            }
+            if (this.triggerFreqHigh) {
+                this.triggerFreqHigh.value = Math.round((this.triggerFreqHighHz[tab] / nyquist) * 1000);
+            }
+            if (this.triggerFreqHighVal) {
+                this.triggerFreqHighVal.textContent = this.formatFreq(this.triggerFreqHighHz[tab]);
+            }
+            if (this.triggerFFTLogic) {
+                this.triggerFFTLogic.value = this.triggerFFTMatchLogic[tab];
+            }
+            
+            if (this.fftVerticalBase === 'dBrms') {
+                if (this.triggerLowLabel) this.triggerLowLabel.textContent = "Low Threshold (dBrms)";
+                if (this.triggerHighLabel) this.triggerHighLabel.textContent = "High Threshold (dBrms)";
+                this.triggerLowVal.textContent = `${activeLowVolts.toFixed(1)} dBrms`;
+                this.triggerHighVal.textContent = `${activeHighVolts.toFixed(1)} dBrms`;
+            } else {
+                if (this.triggerLowLabel) this.triggerLowLabel.textContent = "Low Threshold (Vrms)";
+                if (this.triggerHighLabel) this.triggerHighLabel.textContent = "High Threshold (Vrms)";
+                this.triggerLowVal.textContent = `${activeLowVolts.toFixed(3)} Vrms`;
+                this.triggerHighVal.textContent = `${activeHighVolts.toFixed(3)} Vrms`;
+            }
+        } else {
+            if (this.triggerFFTRangeGroup) this.triggerFFTRangeGroup.classList.add('hide');
+            if (this.triggerLowLabel) this.triggerLowLabel.textContent = "Low Threshold (V_low)";
+            if (this.triggerHighLabel) this.triggerHighLabel.textContent = "High Threshold (V_high)";
+            this.triggerLowVal.textContent = `${activeLowVolts.toFixed(3)} V`;
+            this.triggerHighVal.textContent = `${activeHighVolts.toFixed(3)} V`;
+        }
         
         this.triggerSamples.value = this.triggerMinSamples[tab];
         this.triggerSamplesVal.textContent = `${this.triggerMinSamples[tab]} ${this.triggerMinSamples[tab] === 1 ? 'sample' : 'samples'}`;
@@ -1677,9 +1963,9 @@ class OscilloscopeApp {
             drawViewportGrid(0, 0, width, height);
             
             // Draw Traces on full viewport
-            this.drawTrace(1, 0, 0, width, height, false);
-            this.drawTrace(2, 0, 0, width, height, false);
-            this.drawTrace(3, 0, 0, width, height, false);
+            this.drawTrace(1, 0, 0, width, height);
+            this.drawTrace(2, 0, 0, width, height);
+            this.drawTrace(3, 0, 0, width, height);
         } else {
             // Split Viewport Layout (Two separate frames)
             const splitY = height / 2;
@@ -1690,11 +1976,11 @@ class OscilloscopeApp {
             this.ctx.rect(0, 0, width, splitY);
             this.ctx.clip();
             drawViewportGrid(0, 0, width, splitY);
-            this.drawTrace(1, 0, 0, width, splitY, true);
+            this.drawTrace(1, 0, 0, width, splitY);
             
             // Draw MATH on TOP split if CH2 is ACTIVE
             if (this.ch2Enable.checked) {
-                this.drawTrace(3, 0, 0, width, splitY, true);
+                this.drawTrace(3, 0, 0, width, splitY);
             }
             this.ctx.restore();
             
@@ -1704,11 +1990,11 @@ class OscilloscopeApp {
             this.ctx.rect(0, splitY, width, splitY);
             this.ctx.clip();
             drawViewportGrid(0, splitY, width, splitY);
-            this.drawTrace(2, 0, splitY, width, splitY, true);
+            this.drawTrace(2, 0, splitY, width, splitY);
             
             // Draw MATH on BOTTOM split if CH2 is INACTIVE
             if (!this.ch2Enable.checked) {
-                this.drawTrace(3, 0, splitY, width, splitY, true);
+                this.drawTrace(3, 0, splitY, width, splitY);
             }
             this.ctx.restore();
             
@@ -1779,7 +2065,7 @@ class OscilloscopeApp {
         }
     }
     
-    drawTrace(channelId, vx, vy, vw, vh, isSplitViewport) {
+    drawTrace(channelId, vx, vy, vw, vh) {
         // Resolve target arrays and settings
         let timeData, voltageData, color, enabled, isFFT, offsetDiv;
         let chanName;
@@ -1919,10 +2205,90 @@ class OscilloscopeApp {
             this.ctx.stroke();
             this.ctx.restore();
             
-            // Render beautiful tiny label in viewport for frequency markers
+            // Draw dotted threshold and frequency limit lines if trigger is enabled for this channel and it is the selected active tab
+            if (this.triggerEnabled[chanName] && chanName === this.activeTab) {
+                this.ctx.save();
+                this.ctx.lineWidth = 1.0;
+                this.ctx.setLineDash([3, 3]);
+
+                // --- 1. Horizontal magnitude threshold lines ---
+                const lowL = this.triggerLowVolts[chanName];
+                const highL = this.triggerHighVolts[chanName];
+
+                const yLow = getCanvasYFFT(lowL);
+                const yHigh = getCanvasYFFT(highL);
+
+                // Ensure horizontal lines are drawn only within the viewport vertical bounds [vy, vy + vh]
+                if (yLow >= vy && yLow <= vy + vh) {
+                    if (chanName === 'CH1') {
+                        this.ctx.strokeStyle = 'rgba(0, 255, 102, 0.55)'; // Neon Green
+                    } else if (chanName === 'CH2') {
+                        this.ctx.strokeStyle = 'rgba(0, 229, 255, 0.55)'; // Neon Blue
+                    } else {
+                        this.ctx.strokeStyle = 'rgba(189, 0, 255, 0.55)'; // Neon Purple
+                    }
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(vx, yLow);
+                    this.ctx.lineTo(vx + vw, yLow);
+                    this.ctx.stroke();
+                }
+
+                if (yHigh >= vy && yHigh <= vy + vh) {
+                    if (chanName === 'CH1') {
+                        this.ctx.strokeStyle = 'rgba(255, 102, 0, 0.55)'; // Orange
+                    } else if (chanName === 'CH2') {
+                        this.ctx.strokeStyle = 'rgba(212, 175, 55, 0.55)'; // Gold
+                    } else {
+                        this.ctx.strokeStyle = 'rgba(255, 0, 127, 0.55)'; // Magenta
+                    }
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(vx, yHigh);
+                    this.ctx.lineTo(vx + vw, yHigh);
+                    this.ctx.stroke();
+                }
+
+                // --- 2. Vertical frequency range limit lines ---
+                const fLow = this.triggerFreqLowHz[chanName];
+                const fHigh = this.triggerFreqHighHz[chanName];
+
+                const xLow = getCanvasXFFT(fLow);
+                const xHigh = getCanvasXFFT(fHigh);
+
+                let vColor;
+                if (chanName === 'CH1') {
+                    vColor = 'rgba(0, 255, 102, 0.45)';
+                } else if (chanName === 'CH2') {
+                    vColor = 'rgba(0, 229, 255, 0.45)';
+                } else {
+                    vColor = 'rgba(189, 0, 255, 0.45)';
+                }
+
+                // Ensure vertical lines are drawn only within the viewport horizontal bounds [vx, vx + vw]
+                if (xLow >= vx && xLow <= vx + vw) {
+                    this.ctx.strokeStyle = vColor;
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(xLow, vy);
+                    this.ctx.lineTo(xLow, vy + vh);
+                    this.ctx.stroke();
+                }
+
+                if (xHigh >= vx && xHigh <= vx + vw) {
+                    this.ctx.strokeStyle = vColor;
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(xHigh, vy);
+                    this.ctx.lineTo(xHigh, vy + vh);
+                    this.ctx.stroke();
+                }
+
+                this.ctx.restore();
+            }
+            
+            
+            // Render tiny label in viewport for frequency markers
             this.ctx.fillStyle = color;
             this.ctx.font = '10px monospace';
-            const textY = vy + (isSplitViewport ? 18 : 25) + (channelId === 1 ? 0 : (channelId === 2 ? 15 : 30));
+            const lineHeight = 12;
+            const textY = vy + vh - (lineHeight * 2.2) - (channelId === 1 ? 0 : (channelId === 2 ? lineHeight : lineHeight * 2));
             const freqDiv = maxFreq / 12;
             this.ctx.fillText(`${chanName} FFT Spectrum: ${this.formatFreq(freqDiv)}/div | Window: ${this.fftWindow}`, vx + 10, textY);
             
