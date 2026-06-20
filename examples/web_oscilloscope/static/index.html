@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>High-Performance Hantek DSO5102P Oscilloscope Viewer</title>
+    <title>Hantek DSO5102P Oscilloscope Viewer</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -24,9 +24,13 @@
                 </div>
                 
                 <div class="control-group" id="file-select-group">
-                    <input type="file" id="local-file-input" accept=".csv" style="display: none;">
-                    <button id="local-file-btn" class="btn btn-blue">Load Local CSV</button>
-                    <span id="selected-file-name" style="font-size: 13px; color: #888888; font-family: monospace;">No file loaded</span>
+                    <input type="file" id="local-file-input-ch1" accept=".csv" style="display: none;">
+                    <button id="local-file-btn-ch1" class="btn btn-blue">CH1 CSV</button>
+                    <span id="selected-file-name-ch1" style="font-size: 11px; color: #888888; font-family: monospace; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">No CH1 file</span>
+                    
+                    <input type="file" id="local-file-input-ch2" accept=".csv" style="display: none;">
+                    <button id="local-file-btn-ch2" class="btn btn-blue">CH2 CSV</button>
+                    <span id="selected-file-name-ch2" style="font-size: 11px; color: #888888; font-family: monospace; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">No CH2 file</span>
                 </div>
 
                 <div class="control-group buttons">
@@ -46,13 +50,14 @@
                 
                 <!-- On-Screen Display (OSD) overlay -->
                 <div id="osd-overlay" class="osd-overlay">
-                    <div class="osd-col left">
-                        <div>CH1 Scale: <span id="osd-voltbase">--</span>/div</div>
-                        <div>Offset: <span id="osd-offset">--</span> V</div>
+                    <div id="osd-left-container" style="display: flex; flex-direction: column; gap: 8px;">
+                        <!-- Dynamic channel OSD blocks added here -->
                     </div>
-                    <div class="osd-col right">
-                        <div>Timebase: <span id="osd-timebase">--</span>/div</div>
-                        <div>Samples: <span id="osd-size">0</span></div>
+                    <div id="osd-right-container" style="display: flex; flex-direction: column; gap: 8px; align-items: flex-end;">
+                        <div class="osd-col right">
+                            <div>Timebase: <span id="osd-timebase">--</span></div>
+                            <div>Samples: <span id="osd-size">0</span></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -89,24 +94,77 @@
                     </div>
                 </div>
 
-                <div class="section-title">VERTICAL (Y-AXIS)</div>
+                <div class="section-title">CHANNEL & LAYOUT</div>
                 <div class="calibration-section">
+                    <div class="knob-control checkbox-group" style="display: flex; flex-direction: column;">
+                        <label class="checkbox-label" style="color: #00ff66; margin-bottom: 8px;">
+                            <input type="checkbox" id="ch1-enable" checked> CH1
+                        </label>
+                        <label class="checkbox-label" style="color: #00e5ff; margin-bottom: 8px;">
+                            <input type="checkbox" id="ch2-enable" checked> CH2
+                        </label>
+                        <label class="checkbox-label" style="color: #bd00ff; margin-bottom: 0;">
+                            <input type="checkbox" id="math-enable"> MATH
+                        </label>
+                    </div>
+                    <div class="knob-control" style="margin-top: 12px; margin-bottom: 0;">
+                        <label>Display Layout</label>
+                        <select id="layout-selector" style="width: 100%;">
+                            <option value="overlay">Overlay</option>
+                            <option value="split">Split</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="section-title">VERTICAL CONTROLS</div>
+                <div class="calibration-section">
+                    <div class="tab-strip" style="display: flex; gap: 4px; background-color: #111; padding: 4px; border-radius: 4px; margin-bottom: 12px;">
+                        <button id="tab-ch1" class="tab-btn active" style="flex: 1; background: none; border: none; color: #888; padding: 6px; font-size: 11px; font-weight: 700; cursor: pointer; border-radius: 3px; transition: all 0.2s;">CH1</button>
+                        <button id="tab-ch2" class="tab-btn" style="flex: 1; background: none; border: none; color: #888; padding: 6px; font-size: 11px; font-weight: 700; cursor: pointer; border-radius: 3px; transition: all 0.2s;">CH2</button>
+                        <button id="tab-math" class="tab-btn" style="flex: 1; background: none; border: none; color: #888; padding: 6px; font-size: 11px; font-weight: 700; cursor: pointer; border-radius: 3px; transition: all 0.2s;">MATH</button>
+                    </div>
+                    
+                    <div class="knob-control hide" id="math-op-control" style="margin-bottom: 12px;">
+                        <label>Math Operation</label>
+                        <select id="math-op-selector" style="width: 100%;">
+                            <option value="CH1+CH2">CH1 + CH2</option>
+                            <option value="CH1-CH2">CH1 - CH2</option>
+                            <option value="CH2-CH1">CH2 - CH1</option>
+                            <option value="CH1*CH2">CH1 × CH2</option>
+                            <option value="CH1/CH2">CH1 / CH2</option>
+                            <option value="CH2/CH1">CH2 / CH1</option>
+                        </select>
+                    </div>
+
                     <div class="knob-control">
-                        <label>Voltbase (V/div)</label>
+                        <label id="voltbase-label">Voltbase (V/div)</label>
                         <div class="input-row">
                             <button id="volt-zoom-out" class="step-btn">-</button>
                             <span id="voltbase-val" class="value-display">--</span>
                             <button id="volt-zoom-in" class="step-btn">+</button>
                         </div>
                     </div>
+                    
                     <div class="knob-control">
-                        <label>Position (Offset)</label>
+                        <label id="offset-label">Position (Offset)</label>
                         <input type="range" id="volt-offset" class="slider" min="-125" max="125" value="0">
                         <div class="offset-vals">
                             <span>-5 div</span>
                             <span id="offset-val">0.000 V</span>
                             <span>+5 div</span>
                         </div>
+                    </div>
+
+                    <div class="knob-control checkbox-control" style="margin-top: 12px; display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #2a2a2a; padding-top: 12px; margin-bottom: 8px;">
+                        <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px;">
+                            <input type="checkbox" id="osd-enable" checked> Show OSD Info
+                        </label>
+                    </div>
+                    <div class="knob-control checkbox-control" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0;">
+                        <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px;">
+                            <input type="checkbox" id="fft-enable"> Enable FFT
+                        </label>
+                        <button id="fft-settings-btn" class="gear-btn" style="background: none; border: none; font-size: 16px; cursor: pointer; color: #888; padding: 4px; transition: color 0.2s;" title="FFT Configuration">⚙️</button>
                     </div>
                 </div>
 
@@ -193,6 +251,36 @@
         </main>
     </div>
     
+    <!-- FFT Settings Dialog (Glassmorphism Modal) -->
+    <dialog id="fft-settings-dialog" style="background: rgba(22, 22, 22, 0.75); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 25px; max-width: 400px; width: 90%; color: #e0e0e0; box-shadow: 0 10px 30px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1); outline: none; margin: auto; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);">
+        <div style="display: flex; flex-direction: column; gap: 20px;">
+            <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: #ffffff; border-bottom: 1px solid #333; padding-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px;">FFT Spectrum Settings</h3>
+            
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+                <label for="fft-window-select" style="font-size: 11px; font-weight: 600; color: #888888; text-transform: uppercase;">Window Function</label>
+                <select id="fft-window-select" style="width: 100%; box-sizing: border-box;">
+                    <option value="Rectangular">Rectangular (None)</option>
+                    <option value="Hanning" selected>Hanning (Hann)</option>
+                    <option value="Flattop">Flattop</option>
+                    <option value="Bartlett">Bartlett (Triangular)</option>
+                    <option value="Blackman">Blackman</option>
+                </select>
+            </div>
+            
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+                <label for="fft-base-select" style="font-size: 11px; font-weight: 600; color: #888888; text-transform: uppercase;">Vertical Scale Base</label>
+                <select id="fft-base-select" style="width: 100%; box-sizing: border-box;">
+                    <option value="Vrms" selected>Vrms (Linear Volts RMS)</option>
+                    <option value="dBrms">dBrms (Logarithmic, ref 1V RMS)</option>
+                </select>
+            </div>
+            
+            <div style="display: flex; justify-content: flex-end; margin-top: 10px; border-top: 1px solid #333; padding-top: 15px;">
+                <button id="fft-dialog-close" class="btn btn-blue" style="border-radius: 4px; padding: 8px 20px;">Apply & Close</button>
+            </div>
+        </div>
+    </dialog>
+
     <a id="download-link" style="display: none;"></a>
     <script src="/static/app.js"></script>
 </body>

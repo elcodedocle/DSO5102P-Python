@@ -17,7 +17,8 @@ except ImportError:
 
 app = FastAPI(title="Hantek DSO5102P High-Performance Web Oscilloscope")
 
-active_connections = set()
+active_connections_ch1 = set()
+active_connections_ch2 = set()
 
 # Thread-safe stream handler to bridge DSO thread write() calls into ASGI WebSockets
 class WebSocketStreamer:
@@ -47,14 +48,16 @@ class WebSocketStreamer:
 
 # Global state
 dso: Optional[DSO5102P] = None
-live_streamer: Optional[WebSocketStreamer] = None
+live_streamer_ch1: Optional[WebSocketStreamer] = None
+live_streamer_ch2: Optional[WebSocketStreamer] = None
 mock_thread: Optional[threading.Thread] = None
 mock_active = False
 
 # Simulated/Mock waveform generator for fallback mode
-def run_mock_generator(streamer: WebSocketStreamer):
+def run_mock_generator(streamer_ch1: WebSocketStreamer, streamer_ch2: WebSocketStreamer):
     global mock_active
     print("Mock Waveform Generator Thread Started (WebSockets).", flush=True)
+    import math
     
     # We will simulate a standard 40K buffer capture every 0.15s
     size = 4000
@@ -66,30 +69,42 @@ def run_mock_generator(streamer: WebSocketStreamer):
     dt = timebase_s / samples_per_div
     
     t_accumulator = 0.0
-    frequency = 100.0  # 100 Hz signal
+    frequency1 = 100.0  # 100 Hz signal for CH1 (sine)
+    frequency2 = 150.0  # 150 Hz signal for CH2 (cosine)
     
     while mock_active:
-        # Construct CSV chunk
-        chunk_lines = [
-            f"#timebase={timebase_ps}(ps)",
-            f",#voltbase={voltbase_uV}(uV)",
-            f"#size={size}"
-        ]
-        
-        # Generate sine wave with slight noise
-        for _ in range(size):
-            t_accumulator += dt
-            v = 12.0 * math_sine(2 * 3.14159 * frequency * t_accumulator)
-            v_mv = v * 1000.0
-            chunk_lines.append(f"{t_accumulator:.5E},{v_mv:.3f}")
+        # CH1 Stream
+        if streamer_ch1 and streamer_ch1.connections:
+            chunk_lines = [
+                f"#timebase={timebase_ps}(ps)",
+                f",#voltbase={voltbase_uV}(uV)",
+                f"#size={size}"
+            ]
+            t = t_accumulator
+            for _ in range(size):
+                t += dt
+                v = 12.0 * math.sin(2 * 3.14159 * frequency1 * t)
+                v_mv = v * 1000.0
+                chunk_lines.append(f"{t:.5E},{v_mv:.3f}")
+            streamer_ch1.write("\n".join(chunk_lines) + "\n")
             
-        streamer.write("\n".join(chunk_lines) + "\n")
+        # CH2 Stream
+        if streamer_ch2 and streamer_ch2.connections:
+            chunk_lines = [
+                f"#timebase={timebase_ps}(ps)",
+                f",#voltbase={voltbase_uV}(uV)",
+                f"#size={size}"
+            ]
+            t = t_accumulator
+            for _ in range(size):
+                t += dt
+                v = 8.0 * math.cos(2 * 3.14159 * frequency2 * t)
+                v_mv = v * 1000.0
+                chunk_lines.append(f"{t:.5E},{v_mv:.3f}")
+            streamer_ch2.write("\n".join(chunk_lines) + "\n")
+            
+        t_accumulator += size * dt
         time.sleep(0.15)
-
-
-def math_sine(x):
-    import math
-    return math.sin(x)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -100,31 +115,38 @@ def get_index():
     return "<h3>index.html not found.</h3>"
 
 
-@app.websocket("/ws/live")
-async def websocket_endpoint(websocket: WebSocket):
+async def manage_ws_session(websocket: WebSocket, active_set: set):
     await websocket.accept()
-    active_connections.add(websocket)
-    # Capture the streamer instance active at the time of connection
-    my_streamer = live_streamer
-    print(f"WebSocket client connected. Total clients: {len(active_connections)}", flush=True)
+    active_set.add(websocket)
+    print(f"WebSocket client connected. Total clients on this channel: {len(active_set)}", flush=True)
     try:
         while True:
-            # Keep socket open and receive heartbeat/messages from client if any
             await websocket.receive_text()
     except WebSocketDisconnect:
         pass
     finally:
-        active_connections.discard(websocket)
-        print(f"WebSocket client disconnected. Total clients: {len(active_connections)}", flush=True)
-        # Only perform automatic stream cleanup if:
-        # 1. This disconnect belongs to the currently active stream session
-        # 2. There are no remaining active connections
-        if len(active_connections) == 0 and live_streamer is not None and live_streamer is my_streamer:
-            print("Last WebSocket client of the current session disconnected. Performing automatic stream cleanup.", flush=True)
+        active_set.discard(websocket)
+        print(f"WebSocket client disconnected. Total clients remaining on this channel: {len(active_set)}", flush=True)
+        # Trigger cleanup if both channels are empty
+        if len(active_connections_ch1) == 0 and len(active_connections_ch2) == 0:
+            print("All WebSocket clients disconnected. Performing automatic stream cleanup.", flush=True)
             try:
                 await live_stop()
             except Exception as e:
                 print(f"Error during automatic stream cleanup: {e}", flush=True)
+
+@app.websocket("/ws/live/ch1")
+async def websocket_endpoint_ch1(websocket: WebSocket):
+    await manage_ws_session(websocket, active_connections_ch1)
+
+@app.websocket("/ws/live/ch2")
+async def websocket_endpoint_ch2(websocket: WebSocket):
+    await manage_ws_session(websocket, active_connections_ch2)
+
+# Fallback for old/generic connections
+@app.websocket("/ws/live")
+async def websocket_endpoint_legacy(websocket: WebSocket):
+    await manage_ws_session(websocket, active_connections_ch1)
 
 
 @app.get("/api/settings")
@@ -166,17 +188,18 @@ async def get_settings(channel: int = 0):
 
 
 @app.post("/api/live/start")
-async def live_start(channel: int = 0):
-    global dso, live_streamer, mock_thread, mock_active
+async def live_start():
+    global dso, live_streamer_ch1, live_streamer_ch2, mock_thread, mock_active
     
-    # If a streamer is already running (e.g. from an old reloaded session), stop it first
-    if live_streamer is not None:
+    # If a streamer is already running, stop it first
+    if live_streamer_ch1 is not None or live_streamer_ch2 is not None:
         print("Streamer already running during start. Stopping old stream first...", flush=True)
         await live_stop()
 
     # Grab the running asyncio loop to allow threads to write to WebSockets
     loop = asyncio.get_running_loop()
-    live_streamer = WebSocketStreamer(loop, active_connections)
+    live_streamer_ch1 = WebSocketStreamer(loop, active_connections_ch1)
+    live_streamer_ch2 = WebSocketStreamer(loop, active_connections_ch2)
     
     # Attempt physical DSO connection
     if DSO5102P is not None:
@@ -187,7 +210,8 @@ async def live_start(channel: int = 0):
             
             dso = await loop.run_in_executor(None, create_dso)
             print("Physical DSO5102P Connected. Starting streaming...", flush=True)
-            dso.start(file_handler=live_streamer, channel=channel)
+            # Start streaming both channels
+            dso.start(file_handler={0: live_streamer_ch1, 1: live_streamer_ch2}, channel=[0, 1])
             mock_active = False
             return {"status": "connected", "mock": False}
         except Exception as e:
@@ -199,14 +223,14 @@ async def live_start(channel: int = 0):
 
     # Fallback to mock streaming thread
     mock_active = True
-    mock_thread = threading.Thread(target=run_mock_generator, args=(live_streamer,), daemon=True)
+    mock_thread = threading.Thread(target=run_mock_generator, args=(live_streamer_ch1, live_streamer_ch2), daemon=True)
     mock_thread.start()
     return {"status": "connected", "mock": True}
 
 
 @app.post("/api/live/stop")
 async def live_stop():
-    global dso, live_streamer, mock_thread, mock_active
+    global dso, live_streamer_ch1, live_streamer_ch2, mock_thread, mock_active
     
     # Stop physical DSO
     if dso is not None:
@@ -230,7 +254,8 @@ async def live_stop():
                 pass
             mock_thread = None
             
-    live_streamer = None
+    live_streamer_ch1 = None
+    live_streamer_ch2 = None
     return {"status": "stopped"}
 
 
