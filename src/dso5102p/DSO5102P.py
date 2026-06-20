@@ -11,6 +11,7 @@
 #
 
 import logging
+import math
 import os
 import sys
 import threading
@@ -283,7 +284,10 @@ class DSO5102P:
         total_samples_written = 0
         dt = 0.0
         size_pos = None
-        
+        _prec_steps = []
+        _prec_idx = 0
+        _t_decimals = 5
+
         try:
             while self._streaming:
                 if capture_duration_s is not None and (time.time() - start_time) >= capture_duration_s:
@@ -302,7 +306,7 @@ class DSO5102P:
                     time.sleep(0.1)
                     continue
                 
-                # Write header exactly once on first successful buffer fetch
+                # Write header, just once
                 if not is_header_written:
                     header_lines = [
                         f"#timebase={timebase}(ps)",
@@ -333,6 +337,19 @@ class DSO5102P:
                     
                     timebase_s = timebase * 1e-12
                     dt = timebase_s / samples_per_div
+                    # sample-count thresholds
+                    # used to calculate minimum decimal places
+                    # required to preserve 1us or better resolution
+                    # as capture time goes by
+                    if dt > 0:
+                        t_thr, k = 1.0, 0
+                        while True:
+                            n = math.ceil(t_thr / dt)
+                            _prec_steps.append((n, k + 6))
+                            if n > 10 ** 15:
+                                break
+                            t_thr *= 10.0
+                            k += 1
                 
                 # Write samples with continuously increasing timestamps
                 chunk_lines = []
@@ -340,12 +357,15 @@ class DSO5102P:
                     total_samples_written += 1
                     signed_val = val if val < 128 else val - 256
                     t_val = total_samples_written * dt
-                    t_str = f"{t_val:.5E}"
+                    while _prec_idx < len(_prec_steps) and total_samples_written >= _prec_steps[_prec_idx][0]:
+                        _t_decimals = _prec_steps[_prec_idx][1]
+                        _prec_idx += 1
+                    t_str = f"{t_val:.{_t_decimals}E}"
                     v_val = (signed_val / 25.0) * (voltbase / 1000.0)
                     v_str = f"{v_val:.3f}"
                     chunk_lines.append(f"{t_str},{v_str}")
                 
-                # Excecute a single consolidated write call per capture (boosts performance by 40,000x!)
+                # Excecute a single consolidated write call per capture
                 handler.write("\n".join(chunk_lines) + "\n")
                 
                 handler.flush()

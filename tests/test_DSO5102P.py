@@ -412,6 +412,93 @@ class TestCSVStreamer(unittest.TestCase):
         # Verify second row: time 5.00000E-05, voltage 13200.000
         self.assertIn("5.00000E-05,13200.000", csv_content)
 
+    def test_stream_loop_timestamp_precision_upgrades(self):
+        """Decimal places step from 5 to 6 the first sample that crosses t=1 s."""
+        import io
+        dso = _make_dso()
+
+        # HORIZ_VALS[31] = 50_000_000_000_000 ps = 50 s
+        # size=2 < 8000 -> samples_per_div=80 -> dt = 50/80 = 0.625 s
+        # precision threshold: ceil(1.0 / 0.625) = 2
+        # sample 1  total=1  t=0.625 s  (<2) -> 5 decimals -> 6.25000E-01
+        # sample 2  total=2  t=1.250 s  (≥2) -> 6 decimals -> 1.250000E+00
+        settings_payload = [0] * 208
+        settings_payload[1]   = 11  # CH1 voltbase idx 11 -> 5_000_000 uV
+        settings_payload[5]   = 0   # CH1 probe x1
+        settings_payload[11]  = 11  # CH2 voltbase idx 11
+        settings_payload[15]  = 0   # CH2 probe x1
+        settings_payload[160] = 31  # timebase idx 31 -> 50 s
+
+        # val=127 -> signed=127 -> v = (127/25)*5000 = 25400.000
+        s1 = _make_response(0x82, [0x01, 0x00, 127, 127])
+        s2 = _make_response(0x82, [0x02, 0x00])
+
+        dso.dev.read.side_effect = [
+            _make_response(0x81, settings_payload),
+            s1, s2,
+        ]
+
+        dso._streaming = True
+        orig_rsd = dso.read_sample_data
+        def _once(ch):
+            r = orig_rsd(ch)
+            dso._streaming = False
+            return r
+        dso.read_sample_data = _once
+
+        out = io.StringIO()
+        dso._stream_loop(out, capture_duration_s=None, channel=0)
+        csv = out.getvalue()
+
+        # Before 1 s: 5 decimal places
+        self.assertIn("6.25000E-01,25400.000", csv)
+        # At/after 1 s: 6 decimal places
+        self.assertIn("1.250000E+00,25400.000", csv)
+
+    def test_stream_loop_timestamp_precision_multi_tier(self):
+        """Precision advances again at t=10 s (7 decimal places)."""
+        import io
+        dso = _make_dso()
+
+        # HORIZ_VALS[31]=50s, samples_per_div=80 → dt=0.625 s
+        # 1 s threshold: ceil(1.0/0.625) = 2  → 6 decimals
+        # 10 s threshold: ceil(10.0/0.625) = 16 → 7 decimals
+        # Samples 1-15: t < 10 s → 6 decimals (after passing t=1 s at sample 2)
+        # Sample 16: t = 10.0 s → 7 decimals
+        settings_payload = [0] * 208
+        settings_payload[1]   = 11
+        settings_payload[5]   = 0
+        settings_payload[11]  = 11
+        settings_payload[15]  = 0
+        settings_payload[160] = 31  # 50 s
+
+        # 16 samples of value 0 → v=0.000
+        data_bytes = [0x01, 0x00] + [0] * 16
+        s1 = _make_response(0x82, data_bytes)
+        s2 = _make_response(0x82, [0x02, 0x00])
+
+        dso.dev.read.side_effect = [
+            _make_response(0x81, settings_payload),
+            s1, s2,
+        ]
+
+        dso._streaming = True
+        orig_rsd = dso.read_sample_data
+        def _once(ch):
+            r = orig_rsd(ch)
+            dso._streaming = False
+            return r
+        dso.read_sample_data = _once
+
+        out = io.StringIO()
+        dso._stream_loop(out, capture_duration_s=None, channel=0)
+        csv = out.getvalue()
+
+        # sample 15: t=9.375 s → 6 decimals
+        self.assertIn("9.375000E+00,0.000", csv)
+        # sample 16: t=10.0 s → 7 decimals
+        self.assertIn("1.0000000E+01,0.000", csv)
+
     def test_start_stop(self):
         dso = _make_dso()
         dso.start(capture_duration_s=0.1)
