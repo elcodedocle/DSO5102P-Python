@@ -80,12 +80,15 @@ def run_mock_generator(streamer_ch1: WebSocketStreamer, streamer_ch2: WebSocketS
                 f",#voltbase={voltbase_uV}(uV)",
                 f"#size={size}"
             ]
+            t_max = t_accumulator + size * dt
+            exp = math.floor(math.log10(t_max)) if t_max > 0 else 0
+            t_decimals = min(15, max(6, math.ceil(exp - math.log10(dt)))) if dt > 0 else 6
             t = t_accumulator
             for _ in range(size):
                 t += dt
                 v = 12.0 * math.sin(2 * 3.14159 * frequency1 * t)
                 v_mv = v * 1000.0
-                chunk_lines.append(f"{t:.5E},{v_mv:.3f}")
+                chunk_lines.append(f"{t:.{t_decimals}E},{v_mv:.3f}")
             streamer_ch1.write("\n".join(chunk_lines) + "\n")
             
         # CH2 Stream
@@ -95,12 +98,15 @@ def run_mock_generator(streamer_ch1: WebSocketStreamer, streamer_ch2: WebSocketS
                 f",#voltbase={voltbase_uV}(uV)",
                 f"#size={size}"
             ]
+            t_max = t_accumulator + size * dt
+            exp = math.floor(math.log10(t_max)) if t_max > 0 else 0
+            t_decimals = min(15, max(6, math.ceil(exp - math.log10(dt)))) if dt > 0 else 6
             t = t_accumulator
             for _ in range(size):
                 t += dt
                 v = 8.0 * math.cos(2 * 3.14159 * frequency2 * t)
                 v_mv = v * 1000.0
-                chunk_lines.append(f"{t:.5E},{v_mv:.3f}")
+                chunk_lines.append(f"{t:.{t_decimals}E},{v_mv:.3f}")
             streamer_ch2.write("\n".join(chunk_lines) + "\n")
             
         t_accumulator += size * dt

@@ -408,21 +408,19 @@ class TestCSVStreamer(unittest.TestCase):
         self.assertIn(",#voltbase=5000000(uV)", csv_content)
         self.assertIn("#size=2", csv_content)
         # Verify first row: size < 8000 uses 200 samples_per_div.
-        # dt = 0.002s / 200 = 1.00000E-05
-        self.assertIn("1.00000E-05,13400.000", csv_content)
-        # Verify second row: time 2.00000E-05, voltage 13200.000
-        self.assertIn("2.00000E-05,13200.000", csv_content)
+        # dt = 0.002s / 200 = 1.000000E-05
+        self.assertIn("1.000000E-05,13400.000", csv_content)
+        # Verify second row: time 2.000000E-05, voltage 13200.000
+        self.assertIn("2.000000E-05,13200.000", csv_content)
 
     def test_stream_loop_timestamp_precision_upgrades(self):
-        """Decimal places step from 5 to 6 the first sample that crosses t=1 s."""
+        """Dynamic precision formats timestamps with at least 6 decimals."""
         import io
         dso = _make_dso()
 
         # HORIZ_VALS[31] = 40_000_000_000_000 ps = 40 s
         # size=5 < 8000 -> samples_per_div=200 -> dt = 40/200 = 0.2 s
-        # precision threshold: ceil(1.0 / 0.2) = 5
-        # sample 1  total=1  t=0.2 s   (<5) -> 5 decimals -> 2.00000E-01
-        # sample 5  total=5  t=1.00 s  (≥5) -> 6 decimals -> 1.000000E+00
+        # Our formula calculates t_decimals = 6 for the block.
         settings_payload = [0] * 208
         settings_payload[1]   = 11  # CH1 voltbase idx 11 -> 5_000_000 uV
         settings_payload[5]   = 0   # CH1 probe x1
@@ -430,7 +428,6 @@ class TestCSVStreamer(unittest.TestCase):
         settings_payload[15]  = 0   # CH2 probe x1
         settings_payload[160] = 31  # timebase idx 31 -> 40 s
 
-        # val=127 -> signed=127 -> v = (127/25)*5000 = 25400.000
         s1 = _make_response(0x82, [0x01, 0x00, 127, 127, 127, 127, 127])
         s2 = _make_response(0x82, [0x02, 0x00])
 
@@ -452,31 +449,79 @@ class TestCSVStreamer(unittest.TestCase):
             dso._stream_loop(out, capture_duration_s=None, channel=0)
         csv = out.getvalue()
 
-        # Before 1 s: 5 decimal places
-        self.assertIn("2.00000E-01,25400.000", csv)
-        # At/after 1 s: 6 decimal places
+        # Both before and after 1 s use 6 decimal places as required by minimum precision
+        self.assertIn("2.000000E-01,25400.000", csv)
         self.assertIn("1.000000E+00,25400.000", csv)
 
     def test_stream_loop_timestamp_precision_multi_tier(self):
-        """Precision advances again at t=10 s (7 decimal places)."""
+        """Precision scales up dynamically for fine resolutions at high elapsed times."""
         import io
         dso = _make_dso()
 
-        # HORIZ_VALS[31]=40s, size < 8000 -> samples_per_div=200 -> dt=0.2 s
-        # 1 s threshold: ceil(1.0/0.2) = 5  -> 6 decimals
-        # 10 s threshold: ceil(10.0/0.2) = 50 -> 7 decimals
-        # Samples 1-49: t < 10 s -> 6 decimals (after passing t=1 s at sample 5)
-        # Sample 50: t = 10.0 s -> 7 decimals
+        # HORIZ_VALS[14] = 80_000_000 ps = 80 us
+        # size=5 < 8000 -> samples_per_div=200 -> dt = 80e-6 / 200 = 4e-7 s
         settings_payload = [0] * 208
         settings_payload[1]   = 11
         settings_payload[5]   = 0
         settings_payload[11]  = 11
         settings_payload[15]  = 0
-        settings_payload[160] = 31  # 40 s
+        settings_payload[160] = 14  # 80 us
 
-        # 50 samples of value 0 -> v=0.000
-        data_bytes = [0x01, 0x00] + [0] * 50
-        s1 = _make_response(0x82, data_bytes)
+        s1 = _make_response(0x82, [0x01, 0x00, 127, 127, 127, 127, 127])
+        s2 = _make_response(0x82, [0x02, 0x00])
+
+        # We mock time.time() to simulate starting at 1000.0 and moving to 1025.0
+        # which means t_base is around 25.0 seconds.
+        # dt = 4e-7. log10(dt) = -6.39794.
+        # at t_max = 25.0, exp = 1.
+        # ceil(exp - log10(dt)) = ceil(1 - (-6.39794)) = 8.
+        # So it must use 8 decimal places!
+        # Sample 1: 24.9999992 -> 2.49999992E+01
+        # Sample 5: 25.0000008 -> 2.50000008E+01
+        dso.dev.read.side_effect = [
+            _make_response(0x81, settings_payload),
+            s1, s2,
+        ]
+
+        dso._streaming = True
+        orig_rsd = dso.read_sample_data
+        def _once(ch):
+            r = orig_rsd(ch)
+            dso._streaming = False
+            return r
+        dso.read_sample_data = _once
+
+        out = io.StringIO()
+        with patch("time.time") as mock_time:
+            # First call inside _stream_loop setup is start_time: return 1000.0
+            # Second call in loop represents t_end: return 1025.0
+            mock_time.side_effect = [1000.0, 1025.0, 1025.0]
+            dso._stream_loop(out, capture_duration_s=None, channel=0)
+        csv = out.getvalue()
+
+        # Verify that 8 decimal places are used for dt=4e-7 at t=25.0
+        # chunk_duration = 5 * 4e-7 = 2e-6
+        # t_base = max(25.0 - 2e-6, 0.0) = 24.999998
+        # Sample 1: t_val = t_base + 1 * dt = 24.9999984 -> 2.49999984E+01
+        # Sample 5: t_val = t_base + 5 * dt = 25.0000000 -> 2.50000000E+01
+        self.assertIn("2.49999984E+01,25400.000", csv)
+        self.assertIn("2.50000000E+01,25400.000", csv)
+
+    def test_stream_loop_timestamp_precision_nanosecond(self):
+        """Precision scales up to 12 decimals for ultra-fine picosecond/nanosecond resolution (2 ns timebase)."""
+        import io
+        dso = _make_dso()
+
+        # HORIZ_VALS[0] = 2000 ps = 2 ns
+        # size=5 < 8000 -> samples_per_div=200 -> dt = 2e-9 / 200 = 1e-11 s (10 ps)
+        settings_payload = [0] * 208
+        settings_payload[1]   = 11
+        settings_payload[5]   = 0
+        settings_payload[11]  = 11
+        settings_payload[15]  = 0
+        settings_payload[160] = 0  # 2 ns timebase
+
+        s1 = _make_response(0x82, [0x01, 0x00, 127, 127, 127, 127, 127])
         s2 = _make_response(0x82, [0x02, 0x00])
 
         dso.dev.read.side_effect = [
@@ -493,14 +538,22 @@ class TestCSVStreamer(unittest.TestCase):
         dso.read_sample_data = _once
 
         out = io.StringIO()
-        with patch("time.time", return_value=1000.0):
+        with patch("time.time") as mock_time:
+            # Simulated elapsed streaming time of 25.0s
+            mock_time.side_effect = [1000.0, 1025.0, 1025.0]
             dso._stream_loop(out, capture_duration_s=None, channel=0)
         csv = out.getvalue()
 
-        # sample 49: t=9.8 s -> 6 decimals
-        self.assertIn("9.800000E+00,0.000", csv)
-        # sample 50: t=10.0 s -> 7 decimals
-        self.assertIn("1.0000000E+01,0.000", csv)
+        # dt = 1e-11 (10 ps). log10(dt) = -11.0.
+        # at t_max = 25.0, exp = 1.
+        # ceil(exp - log10(dt)) = ceil(1 - (-11)) = 12.
+        # So it must format with 12 decimal places after the decimal.
+        # chunk_duration = 5 * 1e-11 = 5e-11.
+        # t_base = max(25.0 - 5e-11, 0.0) = 24.99999999995
+        # Sample 1: t_val = t_base + 1 * dt = 24.99999999996 -> 2.499999999996E+01
+        # Sample 5: t_val = t_base + 5 * dt = 25.00000000000 -> 2.500000000000E+01
+        self.assertIn("2.499999999996E+01,25400.000", csv)
+        self.assertIn("2.500000000000E+01,25400.000", csv)
 
     def test_start_stop(self):
         dso = _make_dso()

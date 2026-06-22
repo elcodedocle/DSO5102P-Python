@@ -106,11 +106,11 @@ class OscilloscopeApp {
         this.selectedRecordingNameBase = '';
         
         // Captured waveform arrays (independent storage per channel)
-        this.timeData1 = new Float32Array(0);
+        this.timeData1 = new Float64Array(0);
         this.voltageData1 = new Float32Array(0);
-        this.timeData2 = new Float32Array(0);
+        this.timeData2 = new Float64Array(0);
         this.voltageData2 = new Float32Array(0);
-        this.timeDataMath = new Float32Array(0);
+        this.timeDataMath = new Float64Array(0);
         this.voltageDataMath = new Float32Array(0);
         
         // File loaded markers
@@ -384,11 +384,11 @@ class OscilloscopeApp {
             this.playBtn.classList.add('hide');
             this.sourceText.textContent = "Live DSO Streams (CH1 & CH2)";
             
-            this.timeData1 = new Float32Array(0);
+            this.timeData1 = new Float64Array(0);
             this.voltageData1 = new Float32Array(0);
-            this.timeData2 = new Float32Array(0);
+            this.timeData2 = new Float64Array(0);
             this.voltageData2 = new Float32Array(0);
-            this.timeDataMath = new Float32Array(0);
+            this.timeDataMath = new Float64Array(0);
             this.voltageDataMath = new Float32Array(0);
             
             this.capturedCount.textContent = "0";
@@ -555,7 +555,7 @@ class OscilloscopeApp {
         }
         
         const totalPoints = rows.length / 2;
-        const timeData = new Float32Array(totalPoints);
+        const timeData = new Float64Array(totalPoints);
         const voltageData = new Float32Array(totalPoints);
         
         for (let i = 0; i < totalPoints; i++) {
@@ -692,13 +692,13 @@ class OscilloscopeApp {
     
     recalculateMath() {
         if (!this.mathEnable.checked || this.timeData1.length === 0) {
-            this.timeDataMath = new Float32Array(0);
+            this.timeDataMath = new Float64Array(0);
             this.voltageDataMath = new Float32Array(0);
             return;
         }
         
         const size = this.timeData1.length;
-        this.timeDataMath = new Float32Array(size);
+        this.timeDataMath = new Float64Array(size);
         this.voltageDataMath = new Float32Array(size);
         
         for (let i = 0; i < size; i++) {
@@ -763,11 +763,11 @@ class OscilloscopeApp {
                 console.error("Failed to pre-fetch settings on stream start:", err);
             }
 
-            this.timeData1 = new Float32Array(0);
+            this.timeData1 = new Float64Array(0);
             this.voltageData1 = new Float32Array(0);
-            this.timeData2 = new Float32Array(0);
+            this.timeData2 = new Float64Array(0);
             this.voltageData2 = new Float32Array(0);
-            this.timeDataMath = new Float32Array(0);
+            this.timeDataMath = new Float64Array(0);
             this.voltageDataMath = new Float32Array(0);
             
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -960,7 +960,7 @@ class OscilloscopeApp {
         let combinedTime, combinedVoltage;
         if (currentSize + newPoints > MAX_SAMPLES) {
             const keepSize = MAX_SAMPLES - newPoints;
-            combinedTime = new Float32Array(MAX_SAMPLES);
+            combinedTime = new Float64Array(MAX_SAMPLES);
             combinedVoltage = new Float32Array(MAX_SAMPLES);
             
             combinedTime.set(currentDataTime.subarray(currentSize - keepSize), 0);
@@ -971,7 +971,7 @@ class OscilloscopeApp {
                 combinedVoltage[keepSize + i] = appendRows[i * 2 + 1];
             }
         } else {
-            combinedTime = new Float32Array(currentSize + newPoints);
+            combinedTime = new Float64Array(currentSize + newPoints);
             combinedVoltage = new Float32Array(currentSize + newPoints);
             
             combinedTime.set(currentDataTime, 0);

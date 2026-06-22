@@ -376,9 +376,6 @@ class DSO5102P:
         total_samples_written = dict.fromkeys(channels, 0)
         dt = dict.fromkeys(channels, 0.0)
         size_pos = dict.fromkeys(channels, None)
-        _prec_steps = {ch: [] for ch in channels}
-        _prec_idx = dict.fromkeys(channels, 0)
-        _t_decimals = dict.fromkeys(channels, 5)
         last_timestamp_written = dict.fromkeys(channels, 0.0)
 
 
@@ -437,30 +434,22 @@ class DSO5102P:
                         
                         timebase_s = timebase * 1e-12
                         dt[ch] = timebase_s / samples_per_div
-                        if dt[ch] > 0:
-                            t_thr, k = 1.0, 0
-                            while True:
-                                n = math.ceil(t_thr / dt[ch])
-                                _prec_steps[ch].append((n, k + 6))
-                                if n > 10 ** 15:
-                                    break
-                                t_thr *= 10.0
-                                k += 1
                     
                     # Write samples with continuously increasing timestamps
                     t_end = time.time() - start_time
                     chunk_duration = size * dt[ch]
                     t_base = max(t_end - chunk_duration, last_timestamp_written[ch])
 
+                    t_max = t_base + size * dt[ch]
+                    exp = math.floor(math.log10(t_max)) if t_max > 0 else 0
+                    t_decimals = min(15, max(6, math.ceil(exp - math.log10(dt[ch])))) if dt[ch] > 0 else 6
+
                     chunk_lines = []
                     for i, val in enumerate(samples):
                         total_samples_written[ch] += 1
                         signed_val = val if val < 128 else val - 256
                         t_val = t_base + (i + 1) * dt[ch]
-                        while _prec_idx[ch] < len(_prec_steps[ch]) and total_samples_written[ch] >= _prec_steps[ch][_prec_idx[ch]][0]:
-                            _t_decimals[ch] = _prec_steps[ch][_prec_idx[ch]][1]
-                            _prec_idx[ch] += 1
-                        t_str = f"{t_val:.{_t_decimals[ch]}E}"
+                        t_str = f"{t_val:.{t_decimals}E}"
                         v_val = (signed_val / 25.0) * (voltbases.get(ch, 5000000) / 1000.0)
                         v_str = f"{v_val:.3f}"
                         chunk_lines.append(f"{t_str},{v_str}")
