@@ -208,10 +208,10 @@ class DSO5102P:
             1000000, 2000000, 5000000, 10000000
         ]
         HORIZ_VALS = [
-            2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000,
-            1000000, 2000000, 5000000, 10000000, 20000000, 50000000, 100000000, 200000000, 500000000,
-            1000000000, 2000000000, 5000000000, 10000000000, 20000000000, 50000000000, 100000000000, 200000000000, 500000000000,
-            1000000000000, 2000000000000, 5000000000000, 10000000000000, 20000000000000, 50000000000000
+            2000, 4000, 8000, 20000, 40000, 80000, 200000, 400000, 800000,
+            2000000, 4000000, 8000000, 20000000, 40000000, 80000000, 200000000, 400000000, 800000000,
+            2000000000, 4000000000, 8000000000, 20000000000, 40000000000, 80000000000, 200000000000, 400000000000, 800000000000,
+            2000000000000, 4000000000000, 8000000000000, 20000000000000, 40000000000000
         ]
         PROBE_MULTIPLIERS = [1, 10, 100, 1000]
         
@@ -343,10 +343,10 @@ class DSO5102P:
             1000000, 2000000, 5000000, 10000000
         ]
         HORIZ_VALS = [
-            2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000,
-            1000000, 2000000, 5000000, 10000000, 20000000, 50000000, 100000000, 200000000, 500000000,
-            1000000000, 2000000000, 5000000000, 10000000000, 20000000000, 50000000000, 100000000000, 200000000000, 500000000000,
-            1000000000000, 2000000000000, 5000000000000, 10000000000000, 20000000000000, 50000000000000
+            2000, 4000, 8000, 20000, 40000, 80000, 200000, 400000, 800000,
+            2000000, 4000000, 8000000, 20000000, 40000000, 80000000, 200000000, 400000000, 800000000,
+            2000000000, 4000000000, 8000000000, 20000000000, 40000000000, 80000000000, 200000000000, 400000000000, 800000000000,
+            2000000000000, 4000000000000, 8000000000000, 20000000000000, 40000000000000
         ]
         PROBE_MULTIPLIERS = [1, 10, 100, 1000]
         
@@ -379,6 +379,8 @@ class DSO5102P:
         _prec_steps = {ch: [] for ch in channels}
         _prec_idx = dict.fromkeys(channels, 0)
         _t_decimals = dict.fromkeys(channels, 5)
+        last_timestamp_written = dict.fromkeys(channels, 0.0)
+
 
         try:
             while self._streaming:
@@ -425,13 +427,13 @@ class DSO5102P:
                         
                         # Determine dt based on the first buffer size
                         if size < 8000:
-                            samples_per_div = 80
+                            samples_per_div = 200
                         elif size < 80000:
-                            samples_per_div = 800
+                            samples_per_div = 2000
                         elif size < 800000:
-                            samples_per_div = 10000
+                            samples_per_div = 25000
                         else:
-                            samples_per_div = 40000
+                            samples_per_div = 100000
                         
                         timebase_s = timebase * 1e-12
                         dt[ch] = timebase_s / samples_per_div
@@ -446,11 +448,15 @@ class DSO5102P:
                                 k += 1
                     
                     # Write samples with continuously increasing timestamps
+                    t_end = time.time() - start_time
+                    chunk_duration = size * dt[ch]
+                    t_base = max(t_end - chunk_duration, last_timestamp_written[ch])
+
                     chunk_lines = []
-                    for val in samples:
+                    for i, val in enumerate(samples):
                         total_samples_written[ch] += 1
                         signed_val = val if val < 128 else val - 256
-                        t_val = total_samples_written[ch] * dt[ch]
+                        t_val = t_base + (i + 1) * dt[ch]
                         while _prec_idx[ch] < len(_prec_steps[ch]) and total_samples_written[ch] >= _prec_steps[ch][_prec_idx[ch]][0]:
                             _t_decimals[ch] = _prec_steps[ch][_prec_idx[ch]][1]
                             _prec_idx[ch] += 1
@@ -458,6 +464,8 @@ class DSO5102P:
                         v_val = (signed_val / 25.0) * (voltbases.get(ch, 5000000) / 1000.0)
                         v_str = f"{v_val:.3f}"
                         chunk_lines.append(f"{t_str},{v_str}")
+
+                    last_timestamp_written[ch] = t_base + size * dt[ch]
                     
                     # Execute a single consolidated write call per capture
                     handler.write("\n".join(chunk_lines) + "\n")

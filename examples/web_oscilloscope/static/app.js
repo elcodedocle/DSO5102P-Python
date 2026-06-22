@@ -144,19 +144,21 @@ class OscilloscopeApp {
         this.horizontalPosition = 0.0; // scroll between 0.0 and 1.0
         
         // 1-2-5 steps tables (Linear Voltage)
+        // Prepopulated Voltages (covering 1X and 10X probe ranges natively up to 100V)
         this.VERT_VALS = [
             0.001, 0.002, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500,
-            1.000, 2.000, 5.000, 10.000
+            1.000, 2.000, 5.000, 10.000, 20.000, 50.000, 100.000
         ];
         
         // Decibel Scale Steps for FFT logarithmic display
         this.DB_DIVS = [1, 2, 5, 10, 15, 20, 25, 30, 40, 50, 60, 80, 100];
         
+        // Prepopulated Timebases (True Physical 2-4-8 Hantek Scale Steps from 2ns to 40s)
         this.HORIZ_VALS = [
-            2e-9, 5e-9, 10e-9, 20e-9, 50e-9, 100e-9, 200e-9, 500e-9,
-            1e-6, 2e-6, 5e-6, 10e-6, 20e-6, 50e-6, 100e-6, 200e-6, 500e-6,
-            1e-3, 2e-3, 5e-3, 10e-3, 20e-3, 50e-3, 100e-3, 200e-3, 500e-3,
-            1.0, 2.0, 5.0, 10.0, 20.0, 50.0
+            2e-9, 4e-9, 8e-9, 20e-9, 40e-9, 80e-9, 200e-9, 400e-9, 800e-9,
+            2e-6, 4e-6, 8e-6, 20e-6, 40e-6, 80e-6, 200e-6, 400e-6, 800e-6,
+            2e-3, 4e-3, 8e-3, 20e-3, 40e-3, 80e-3, 200e-3, 400e-3, 800e-3,
+            2.0, 4.0, 8.0, 20.0, 40.0
         ];
         
         // Trigger Controls (linked to CH1)
@@ -473,7 +475,7 @@ class OscilloscopeApp {
         const vb_uV = 5000000;    // 5V
         
         const timebase_s = tb_ps * 1e-12;
-        const dt = timebase_s / 80;
+        const dt = timebase_s / 200;
         
         let t_accum = 0.0;
         let mock1_lines = [`#timebase=${tb_ps}(ps)`, `,#voltbase=${vb_uV}(uV)`, `#size=${size}`];
@@ -505,7 +507,7 @@ class OscilloscopeApp {
         
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
-            if (line.startsWith('#')) {
+            if (line.startsWith('#') || line.startsWith(',#')) {
                 const tbMatch = line.match(/timebase=(-?\d+)/);
                 const vbMatch = line.match(/voltbase=(\d+)/);
                 
@@ -529,12 +531,13 @@ class OscilloscopeApp {
         if (channel === 1) {
             this.timebaseHeaderCh1 = timebaseHeaderVal;
             this.voltbaseHeaderCh1 = voltbaseHeaderVal;
-            this.currentTimebaseIdx = this.findClosestIndex(tbSeconds, this.HORIZ_VALS);
-            this.currentVoltbaseIdxCh1 = this.findClosestIndex(vbVolts, this.VERT_VALS);
+            this.syncTimebase(tbSeconds);
+            this.syncVoltbase('CH1', vbVolts);
         } else {
             this.timebaseHeaderCh2 = timebaseHeaderVal;
             this.voltbaseHeaderCh2 = voltbaseHeaderVal;
-            this.currentVoltbaseIdxCh2 = this.findClosestIndex(vbVolts, this.VERT_VALS);
+            this.syncTimebase(tbSeconds);
+            this.syncVoltbase('CH2', vbVolts);
         }
         
         const rows = [];
@@ -584,6 +587,78 @@ class OscilloscopeApp {
             }
         }
         return bestIdx;
+    }
+    
+    syncTimebase(tbSeconds) {
+        if (!tbSeconds || tbSeconds <= 0) return;
+        const epsilon = 1e-11;
+        let foundIdx = -1;
+        for (let i = 0; i < this.HORIZ_VALS.length; i++) {
+            if (Math.abs(this.HORIZ_VALS[i] - tbSeconds) < epsilon) {
+                foundIdx = i;
+                break;
+            }
+        }
+        if (foundIdx !== -1) {
+            this.currentTimebaseIdx = foundIdx;
+        } else {
+            this.HORIZ_VALS.push(tbSeconds);
+            this.HORIZ_VALS.sort((a, b) => a - b);
+            for (let i = 0; i < this.HORIZ_VALS.length; i++) {
+                if (Math.abs(this.HORIZ_VALS[i] - tbSeconds) < epsilon) {
+                    this.currentTimebaseIdx = i;
+                    break;
+                }
+            }
+        }
+    }
+    
+    syncVoltbase(channel, vbVolts) {
+        if (!vbVolts || vbVolts <= 0) return;
+        const epsilon = 1e-11;
+        let foundIdx = -1;
+        for (let i = 0; i < this.VERT_VALS.length; i++) {
+            if (Math.abs(this.VERT_VALS[i] - vbVolts) < epsilon) {
+                foundIdx = i;
+                break;
+            }
+        }
+        if (foundIdx === -1) {
+            const ch1Val = this.VERT_VALS[this.currentVoltbaseIdxCh1];
+            const ch2Val = this.VERT_VALS[this.currentVoltbaseIdxCh2];
+            const mathVal = this.VERT_VALS[this.currentVoltbaseIdxMath];
+            
+            this.VERT_VALS.push(vbVolts);
+            this.VERT_VALS.sort((a, b) => a - b);
+            
+            const remapIndex = (originalVal) => {
+                for (let i = 0; i < this.VERT_VALS.length; i++) {
+                    if (Math.abs(this.VERT_VALS[i] - originalVal) < epsilon) {
+                        return i;
+                    }
+                }
+                return 0;
+            };
+            
+            this.currentVoltbaseIdxCh1 = remapIndex(ch1Val);
+            this.currentVoltbaseIdxCh2 = remapIndex(ch2Val);
+            this.currentVoltbaseIdxMath = remapIndex(mathVal);
+            
+            for (let i = 0; i < this.VERT_VALS.length; i++) {
+                if (Math.abs(this.VERT_VALS[i] - vbVolts) < epsilon) {
+                    foundIdx = i;
+                    break;
+                }
+            }
+        }
+        
+        if (channel === 1 || channel === 'CH1') {
+            this.currentVoltbaseIdxCh1 = foundIdx;
+        } else if (channel === 2 || channel === 'CH2') {
+            this.currentVoltbaseIdxCh2 = foundIdx;
+        } else if (channel === 'MATH') {
+            this.currentVoltbaseIdxMath = foundIdx;
+        }
     }
     
     // Fast O(log N) binary-search linear interpolation of CH2 voltages on CH1's timestamp base
@@ -664,6 +739,30 @@ class OscilloscopeApp {
         try {
             const res = await fetch('/api/live/start', { method: 'POST' });
             await res.json();
+            
+            // Pre-fetch active settings to synchronize the UI timebase and voltbase immediately
+            try {
+                const s1Res = await fetch('/api/settings?channel=0');
+                const s1 = await s1Res.json();
+                if (s1 && !s1.error && s1.timebase) {
+                    this.timebaseHeaderCh1 = s1.timebase;
+                    this.voltbaseHeaderCh1 = s1.voltbase;
+                    this.syncTimebase(s1.timebase * 1e-12);
+                    this.syncVoltbase('CH1', s1.voltbase * 1e-6);
+                }
+                
+                const s2Res = await fetch('/api/settings?channel=1');
+                const s2 = await s2Res.json();
+                if (s2 && !s2.error && s2.timebase) {
+                    this.timebaseHeaderCh2 = s2.timebase;
+                    this.voltbaseHeaderCh2 = s2.voltbase;
+                    this.syncTimebase(s2.timebase * 1e-12);
+                    this.syncVoltbase('CH2', s2.voltbase * 1e-6);
+                }
+            } catch (err) {
+                console.error("Failed to pre-fetch settings on stream start:", err);
+            }
+
             this.timeData1 = new Float32Array(0);
             this.voltageData1 = new Float32Array(0);
             this.timeData2 = new Float32Array(0);
@@ -810,7 +909,7 @@ class OscilloscopeApp {
             const line = lines[i].trim();
             if (!line) continue;
             
-            if (line.startsWith('#')) {
+            if (line.startsWith('#') || line.startsWith(',#')) {
                 const tbMatch = line.match(/timebase=(-?\d+)/);
                 const vbMatch = line.match(/voltbase=(\d+)/);
                 
@@ -819,19 +918,20 @@ class OscilloscopeApp {
                     if (tb_raw < 0) tb_raw += 4294967296;
                     if (channel === 1) {
                         this.timebaseHeaderCh1 = tb_raw;
-                        this.currentTimebaseIdx = this.findClosestIndex(tb_raw * 1e-12, this.HORIZ_VALS);
+                        this.syncTimebase(tb_raw * 1e-12);
                     } else {
                         this.timebaseHeaderCh2 = tb_raw;
+                        this.syncTimebase(tb_raw * 1e-12);
                     }
                 }
                 if (vbMatch) {
                     const vb = parseInt(vbMatch[1]);
                     if (channel === 1) {
                         this.voltbaseHeaderCh1 = vb;
-                        this.currentVoltbaseIdxCh1 = this.findClosestIndex(vb * 1e-6, this.VERT_VALS);
+                        this.syncVoltbase('CH1', vb * 1e-6);
                     } else {
                         this.voltbaseHeaderCh2 = vb;
-                        this.currentVoltbaseIdxCh2 = this.findClosestIndex(vb * 1e-6, this.VERT_VALS);
+                        this.syncVoltbase('CH2', vb * 1e-6);
                     }
                 }
                 continue;
@@ -1221,7 +1321,7 @@ class OscilloscopeApp {
         if (visibleCount < 16) return;
 
         // Resolve sampling dt
-        const avg_dt = (endT - startT) / (timeArray.length - 1);
+        const avg_dt = (timeArray[endIndex] - timeArray[startIndex]) / (endIndex - startIndex);
 
         // Slice real voltages
         const sliceReal = voltArray.subarray ? voltArray.subarray(startIndex, endIndex + 1) : voltArray.slice(startIndex, endIndex + 1);
@@ -1440,14 +1540,65 @@ class OscilloscopeApp {
     }
     
     getNyquistFrequency(tab) {
-        let dt = 2.5e-5; // default fallback (40kHz sample rate -> 20kHz Nyquist)
+        let dt = 1e-5; // default fallback (100kHz sample rate -> 50kHz Nyquist)
         const timeData = tab === 'CH1' ? this.timeData1 : (tab === 'CH2' ? this.timeData2 : this.timeDataMath);
-        if (timeData && timeData.length > 1) {
-            dt = (timeData[timeData.length - 1] - timeData[0]) / (timeData.length - 1);
+        
+        const computeSliceDt = (arr) => {
+            if (!arr || arr.length < 2) return null;
+            const startT = arr[0];
+            const endT = arr[arr.length - 1];
+            const totalDuration = endT - startT;
+            const timebase = this.HORIZ_VALS[this.currentTimebaseIdx];
+            const screenDuration = timebase * 12;
+            
+            let viewportStartT, viewportEndT;
+            if (this.mode === 'realtime') {
+                viewportEndT = endT;
+                viewportStartT = Math.max(startT, endT - screenDuration);
+            } else {
+                viewportStartT = startT + (this.horizontalPosition * Math.max(0, totalDuration - screenDuration));
+                viewportEndT = viewportStartT + screenDuration;
+            }
+            
+            let startIndex = 0;
+            let endIndex = arr.length - 1;
+            
+            let low = 0, high = arr.length - 1;
+            while (low <= high) {
+                const mid = (low + high) >> 1;
+                if (arr[mid] < viewportStartT) {
+                    startIndex = mid;
+                    low = mid + 1;
+                } else {
+                    high = mid - 1;
+                }
+            }
+            
+            low = 0; high = arr.length - 1;
+            while (low <= high) {
+                const mid = (low + high) >> 1;
+                if (arr[mid] <= viewportEndT) {
+                    endIndex = mid;
+                    low = mid + 1;
+                } else {
+                    high = mid - 1;
+                }
+            }
+            
+            if (endIndex > startIndex) {
+                return (arr[endIndex] - arr[startIndex]) / (endIndex - startIndex);
+            }
+            return null;
+        };
+
+        const sliceDt = computeSliceDt(timeData);
+        if (sliceDt !== null) {
+            dt = sliceDt;
         } else {
             const anyData = this.timeData1.length > 1 ? this.timeData1 : this.timeData2;
-            if (anyData.length > 1) {
-                dt = (anyData[anyData.length - 1] - anyData[0]) / (anyData.length - 1);
+            const anySliceDt = computeSliceDt(anyData);
+            if (anySliceDt !== null) {
+                dt = anySliceDt;
             }
         }
         return dt > 0 ? 0.5 / dt : 20000;
@@ -1644,7 +1795,7 @@ class OscilloscopeApp {
         this.triggerTime.value = Math.round(this.triggerMinTimeSec[tab] * 1000 * 10);
         this.triggerTimeVal.textContent = `${(this.triggerMinTimeSec[tab] * 1000).toFixed(1)} ms`;
         
-        let samples_per_div = 80;
+        let samples_per_div = 200;
         if (mainTimeData.length > 1) {
             const dt = (mainTimeData[mainTimeData.length - 1] - mainTimeData[0]) / (mainTimeData.length - 1);
             if (dt > 0) {
@@ -1754,15 +1905,23 @@ class OscilloscopeApp {
     }
 
     formatTime(t) {
-        if (t < 1e-6) return `${(t * 1e9).toFixed(0)} ns`;
-        if (t < 1e-3) return `${(t * 1e6).toFixed(0)} us`;
-        if (t < 1.0) return `${(t * 1e3).toFixed(0)} ms`;
-        return `${t.toFixed(0)} s`;
+        const formatWithDecimals = (val) => {
+            const rounded = Math.round(val * 10) / 10;
+            return rounded % 1 === 0 ? rounded.toFixed(0) : rounded.toFixed(1);
+        };
+        if (t < 1e-6) return `${formatWithDecimals(t * 1e9)} ns`;
+        if (t < 1e-3) return `${formatWithDecimals(t * 1e6)} us`;
+        if (t < 1.0) return `${formatWithDecimals(t * 1e3)} ms`;
+        return `${formatWithDecimals(t)} s`;
     }
     
     formatVolt(v) {
-        if (v < 1.0) return `${(v * 1000).toFixed(0)} mV`;
-        return `${v.toFixed(1)} V`;
+        const formatWithDecimals = (val) => {
+            const rounded = Math.round(val * 100) / 100;
+            return rounded % 1 === 0 ? rounded.toFixed(0) : (rounded % 0.1 === 0 ? rounded.toFixed(1) : rounded.toFixed(2));
+        };
+        if (v < 1.0) return `${formatWithDecimals(v * 1000)} mV`;
+        return `${formatWithDecimals(v)} V`;
     }
     
     // In-place Radix-2 Cooley-Tukey FFT implementation
@@ -2149,7 +2308,7 @@ class OscilloscopeApp {
         if (visibleCount <= 0) return;
         
         // Resolve sampling dt
-        const avg_dt = (endT - startT) / (timeData.length - 1);
+        const avg_dt = (timeData[endIndex] - timeData[startIndex]) / (endIndex - startIndex);
         
         // --- CHOOSE GRAPH DOMAIN (FFT vs. Time Domain) ---
         if (isFFT) {

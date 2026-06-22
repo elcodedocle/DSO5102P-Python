@@ -65,7 +65,7 @@ def run_mock_generator(streamer_ch1: WebSocketStreamer, streamer_ch2: WebSocketS
     voltbase_uV = 5000000    # 5V / DIV
     
     timebase_s = timebase_ps * 1e-12
-    samples_per_div = 80
+    samples_per_div = 200
     dt = timebase_s / samples_per_div
     
     t_accumulator = 0.0
@@ -115,10 +115,32 @@ def get_index():
     return "<h3>index.html not found.</h3>"
 
 
-async def manage_ws_session(websocket: WebSocket, active_set: set):
+async def manage_ws_session(websocket: WebSocket, active_set: set, channel_id: int = 0):
     await websocket.accept()
     active_set.add(websocket)
     print(f"WebSocket client connected. Total clients on this channel: {len(active_set)}", flush=True)
+    
+    # Send current settings immediately as headers so the client doesn't miss them
+    try:
+        loop = asyncio.get_running_loop()
+        global dso
+        if dso is not None:
+            def query_active():
+                return dso.get_current_settings(channel=channel_id)
+            settings = await loop.run_in_executor(None, query_active)
+        else:
+            settings = {"timebase": 2000000000, "voltbase": 5000000, "mock": True}
+        
+        if settings and "timebase" in settings:
+            header_lines = [
+                f"#timebase={settings['timebase']}(ps)",
+                f",#voltbase={settings['voltbase']}(uV)",
+                "#size=0"
+            ]
+            await websocket.send_text("\n".join(header_lines) + "\n")
+    except Exception as e:
+        print(f"Failed to send initial settings header to WebSocket: {e}", flush=True)
+
     try:
         while True:
             await websocket.receive_text()
@@ -137,16 +159,17 @@ async def manage_ws_session(websocket: WebSocket, active_set: set):
 
 @app.websocket("/ws/live/ch1")
 async def websocket_endpoint_ch1(websocket: WebSocket):
-    await manage_ws_session(websocket, active_connections_ch1)
+    await manage_ws_session(websocket, active_connections_ch1, channel_id=0)
 
 @app.websocket("/ws/live/ch2")
 async def websocket_endpoint_ch2(websocket: WebSocket):
-    await manage_ws_session(websocket, active_connections_ch2)
+    await manage_ws_session(websocket, active_connections_ch2, channel_id=1)
 
 # Fallback for old/generic connections
 @app.websocket("/ws/live")
 async def websocket_endpoint_legacy(websocket: WebSocket):
-    await manage_ws_session(websocket, active_connections_ch1)
+    await manage_ws_session(websocket, active_connections_ch1, channel_id=0)
+
 
 
 @app.get("/api/settings")
