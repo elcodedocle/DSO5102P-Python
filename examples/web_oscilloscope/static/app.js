@@ -253,6 +253,11 @@ class OscilloscopeApp {
         this.metricsAutoresetVal = document.getElementById('metrics-autoreset-val');
         this.metricsResetBtn = document.getElementById('metrics-reset-btn');
 
+        // Grid Intensity DOM references and state properties
+        this.gridIntensitySlider = document.getElementById('grid-intensity');
+        this.gridIntensityVal = document.getElementById('grid-intensity-val');
+        this.gridIntensity = 25;
+
         // Metrics state properties
         this.metricsEnabledCh1 = this.metricsCh1Enable ? this.metricsCh1Enable.checked : false;
         this.metricsEnabledCh2 = this.metricsCh2Enable ? this.metricsCh2Enable.checked : false;
@@ -416,6 +421,17 @@ class OscilloscopeApp {
         if (this.metricsResetBtn) {
             this.metricsResetBtn.addEventListener('click', () => {
                 this.resetMetrics();
+                this.drawOscilloscope();
+            });
+        }
+
+        // Grid Intensity Slider Listener
+        if (this.gridIntensitySlider) {
+            this.gridIntensitySlider.addEventListener('input', (e) => {
+                this.gridIntensity = parseInt(e.target.value);
+                if (this.gridIntensityVal) {
+                    this.gridIntensityVal.textContent = `${this.gridIntensity}%`;
+                }
                 this.drawOscilloscope();
             });
         }
@@ -2059,6 +2075,13 @@ class OscilloscopeApp {
         this.voltOffset.value = Math.round(this.getVerticalOffset(tab) * 25);
         this.timeScroll.value = Math.round(this.horizontalPosition * 100);
         
+        if (this.gridIntensitySlider) {
+            this.gridIntensitySlider.value = this.gridIntensity;
+        }
+        if (this.gridIntensityVal) {
+            this.gridIntensityVal.textContent = `${this.gridIntensity}%`;
+        }
+        
         const mainTimeData = this.timeData1.length > 0 ? this.timeData1 : this.timeData2;
         if (mainTimeData.length > 0) {
             const startT = mainTimeData[0];
@@ -2477,7 +2500,11 @@ class OscilloscopeApp {
         
         // Inner function to draw a standard CRT subdivision grid inside a viewport clip box
         const drawViewportGrid = (x, y, w, h) => {
-            this.ctx.strokeStyle = 'rgba(0, 255, 102, 0.08)';
+            const intensityFactor = this.gridIntensity / 25.0;
+            const outerOpacity = Math.min(1.0, 0.06 * intensityFactor);
+            const centralOpacity = Math.min(1.0, 0.22 * intensityFactor);
+
+            this.ctx.strokeStyle = `rgba(0, 255, 102, ${outerOpacity})`;
             this.ctx.lineWidth = 1;
             
             const localDy = h / vertDivs;
@@ -2487,10 +2514,10 @@ class OscilloscopeApp {
             for (let i = 1; i < horizDivs; i++) {
                 this.ctx.beginPath();
                 if (i === horizDivs / 2) {
-                    this.ctx.strokeStyle = 'rgba(0, 255, 102, 0.22)';
+                    this.ctx.strokeStyle = `rgba(0, 255, 102, ${centralOpacity})`;
                     this.ctx.setLineDash([2, 2]);
                 } else {
-                    this.ctx.strokeStyle = 'rgba(0, 255, 102, 0.06)';
+                    this.ctx.strokeStyle = `rgba(0, 255, 102, ${outerOpacity})`;
                     this.ctx.setLineDash([]);
                 }
                 this.ctx.moveTo(x + i * localDx, y);
@@ -2502,10 +2529,10 @@ class OscilloscopeApp {
             for (let i = 1; i < vertDivs; i++) {
                 this.ctx.beginPath();
                 if (i === vertDivs / 2) {
-                    this.ctx.strokeStyle = 'rgba(0, 255, 102, 0.22)';
+                    this.ctx.strokeStyle = `rgba(0, 255, 102, ${centralOpacity})`;
                     this.ctx.setLineDash([2, 2]);
                 } else {
-                    this.ctx.strokeStyle = 'rgba(0, 255, 102, 0.06)';
+                    this.ctx.strokeStyle = `rgba(0, 255, 102, ${outerOpacity})`;
                     this.ctx.setLineDash([]);
                 }
                 this.ctx.moveTo(x, y + i * localDy);
@@ -2556,7 +2583,8 @@ class OscilloscopeApp {
             this.ctx.restore();
             
             // Brighter division bar in middle
-            this.ctx.strokeStyle = 'rgba(0, 255, 102, 0.45)';
+            const splitBarOpacity = Math.min(1.0, 0.45 * (this.gridIntensity / 25.0));
+            this.ctx.strokeStyle = `rgba(0, 255, 102, ${splitBarOpacity})`;
             this.ctx.lineWidth = 2;
             this.ctx.beginPath();
             this.ctx.moveTo(0, splitY);
