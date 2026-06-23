@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hantek DSO5102P Oscilloscope Viewer</title>
-    <link rel="stylesheet" href="/static/style.css?v=3">
+    <link rel="stylesheet" href="/static/style.css?v=6">
     <style>
         /* Bulletproof styles for vertical channel tab buttons */
         .tab-btn {
@@ -105,6 +105,9 @@
                         </div>
                     </div>
                 </div>
+                
+                <!-- Cursor Tooltip Overlay -->
+                <div id="cursor-tooltip" class="cursor-tooltip hide"></div>
             </div>
 
             <!-- Calibration Panel -->
@@ -315,6 +318,84 @@
                     </div>
                 </div>
 
+                <div class="section-title">CURSORS</div>
+                <div class="calibration-section">
+                    <div class="knob-control checkbox-control" style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+                        <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px;">
+                            <input type="checkbox" id="cursors-enable"> Enable Cursors
+                        </label>
+                    </div>
+                    
+                    <div id="cursor-channel-selects" class="hide" style="margin-bottom: 12px; border-top: 1px solid #2a2a2a; padding-top: 12px;">
+                        <label style="font-size: 11px; font-weight: 600; color: #888; display: block; margin-bottom: 8px; text-transform: uppercase;">Cursor Channels</label>
+                        <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+                            <label class="checkbox-label" style="color: #00ff66; font-size: 10px;">
+                                <input type="checkbox" id="cursor-ch1-enable" checked> CH1
+                            </label>
+                            <label class="checkbox-label" style="color: #00e5ff; font-size: 10px;">
+                                <input type="checkbox" id="cursor-ch2-enable" checked> CH2
+                            </label>
+                            <label class="checkbox-label" style="color: #bd00ff; font-size: 10px;">
+                                <input type="checkbox" id="cursor-math-enable" checked> MATH
+                            </label>
+                        </div>
+                        
+                        <label style="font-size: 11px; font-weight: 600; color: #888; display: block; margin-bottom: 8px; text-transform: uppercase;">Tracking Mode</label>
+                        <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span style="font-size: 11px; color: #aaa;">CH1:</span>
+                                <select id="cursor-ch1-track" style="font-size: 11px; padding: 2px 6px;">
+                                    <option value="free">Free / Normal</option>
+                                    <option value="track">Track Waveform</option>
+                                </select>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span style="font-size: 11px; color: #aaa;">CH2:</span>
+                                <select id="cursor-ch2-track" style="font-size: 11px; padding: 2px 6px;">
+                                    <option value="free">Free / Normal</option>
+                                    <option value="track">Track Waveform</option>
+                                </select>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span style="font-size: 11px; color: #aaa;">MATH:</span>
+                                <select id="cursor-math-track" style="font-size: 11px; padding: 2px 6px;">
+                                    <option value="free">Free / Normal</option>
+                                    <option value="track">Track Waveform</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="cursor-sliders-group" class="hide" style="border-top: 1px solid #2a2a2a; padding-top: 12px; margin-bottom: 12px;">
+                        <div id="cursor1-sliders" class="hide" style="margin-bottom: 12px;">
+                            <label style="color: #ffaa00; font-size: 10px; font-weight: 700; margin-bottom: 4px;">CURSOR 1 POSITION</label>
+                            <div style="margin-bottom: 6px;">
+                                <label style="font-size: 9px; color: #888; margin-bottom: 2px;">X Position</label>
+                                <input type="range" id="cursor1-x-slider" class="slider" min="0" max="100" value="25" style="margin: 2px 0;">
+                            </div>
+                            <div>
+                                <label style="font-size: 9px; color: #888; margin-bottom: 2px;">Y Position</label>
+                                <input type="range" id="cursor1-y-slider" class="slider" min="0" max="100" value="50" style="margin: 2px 0;">
+                            </div>
+                        </div>
+                        <div id="cursor2-sliders" class="hide" style="margin-bottom: 12px;">
+                            <label style="color: #ff5500; font-size: 10px; font-weight: 700; margin-bottom: 4px;">CURSOR 2 POSITION</label>
+                            <div style="margin-bottom: 6px;">
+                                <label style="font-size: 9px; color: #888; margin-bottom: 2px;">X Position</label>
+                                <input type="range" id="cursor2-x-slider" class="slider" min="0" max="100" value="75" style="margin: 2px 0;">
+                            </div>
+                            <div>
+                                <label style="font-size: 9px; color: #888; margin-bottom: 2px;">Y Position</label>
+                                <input type="range" id="cursor2-y-slider" class="slider" min="0" max="100" value="50" style="margin: 2px 0;">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="cursor-buttons" class="hide" style="border-top: 1px solid #2a2a2a; padding-top: 12px; display: flex; justify-content: center;">
+                        <button id="cursor-reset-btn" class="btn btn-red" style="width: 100%; padding: 6px 12px; font-size: 11px;">Reset Cursors</button>
+                    </div>
+                </div>
+
                 <div class="section-title">STATUS INFO</div>
                 <div class="status-panel">
                     <div>Status: <span id="status-text" class="status-ok">Idle</span></div>
@@ -356,6 +437,6 @@
     </dialog>
 
     <a id="download-link" style="display: none;"></a>
-    <script src="/static/app.js?v=5"></script>
+    <script src="/static/app.js?v=8"></script>
 </body>
 </html>

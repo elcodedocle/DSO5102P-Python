@@ -202,6 +202,8 @@ class OscilloscopeApp {
         this.triggerFreqLowHz = { 'CH1': 100.0, 'CH2': 150.0, 'MATH': 120.0 };
         this.triggerFreqHighHz = { 'CH1': 1000.0, 'CH2': 1500.0, 'MATH': 1200.0 };
         this.triggerFFTMatchLogic = { 'CH1': 'any', 'CH2': 'any', 'MATH': 'any' };
+        this.triggerLowVolts = { 'CH1': -1.0, 'CH2': -1.0, 'MATH': -1.0 };
+        this.triggerHighVolts = { 'CH1': 1.0, 'CH2': 1.0, 'MATH': 1.0 };
         
         // Active Firing & Detection State (Global & tracking source)
         this.isTriggered = false;
@@ -211,9 +213,35 @@ class OscilloscopeApp {
         this.consecutiveOutsideSamples = { 'CH1': 0, 'CH2': 0, 'MATH': 0 };
         this.triggerStartTime = { 'CH1': null, 'CH2': null, 'MATH': null };
         
-        this.triggerLowVolts = { 'CH1': -1.0, 'CH2': -1.0, 'MATH': -1.0 };
-        this.triggerHighVolts = { 'CH1': 1.0, 'CH2': 1.0, 'MATH': 1.0 };
-        
+        // Interactive Cursors DOM references
+        this.cursorsEnableCheckbox = document.getElementById('cursors-enable');
+        this.cursorChannelSelects = document.getElementById('cursor-channel-selects');
+        this.cursorCh1Enable = document.getElementById('cursor-ch1-enable');
+        this.cursorCh2Enable = document.getElementById('cursor-ch2-enable');
+        this.cursorMathEnable = document.getElementById('cursor-math-enable');
+        this.cursorCh1Track = document.getElementById('cursor-ch1-track');
+        this.cursorCh2Track = document.getElementById('cursor-ch2-track');
+        this.cursorMathTrack = document.getElementById('cursor-math-track');
+        this.cursorSlidersGroup = document.getElementById('cursor-sliders-group');
+        this.cursor1Sliders = document.getElementById('cursor1-sliders');
+        this.cursor2Sliders = document.getElementById('cursor2-sliders');
+        this.cursor1XSlider = document.getElementById('cursor1-x-slider');
+        this.cursor1YSlider = document.getElementById('cursor1-y-slider');
+        this.cursor2XSlider = document.getElementById('cursor2-x-slider');
+        this.cursor2YSlider = document.getElementById('cursor2-y-slider');
+        this.cursorResetBtn = document.getElementById('cursor-reset-btn');
+        this.cursorTooltip = document.getElementById('cursor-tooltip');
+        this.cursorButtons = document.getElementById('cursor-buttons');
+
+        // Interactive Cursors State Properties
+        this.cursorsEnabled = false;
+        this.cursorChEnabled = { 'CH1': true, 'CH2': true, 'MATH': true };
+        this.cursorTrackingMode = { 'CH1': 'free', 'CH2': 'free', 'MATH': 'free' };
+        this.cursor1 = null;
+        this.cursor2 = null;
+        this.tempCursor = null;
+        this.lastFFTResult = { 'CH1': null, 'CH2': null, 'MATH': null };
+
         this.init();
     }
     
@@ -307,6 +335,9 @@ class OscilloscopeApp {
         this.triggerFreqHigh.addEventListener('input', (e) => this.onTriggerFreqHighChange(e.target.value));
         this.triggerFFTLogic.addEventListener('change', (e) => this.onTriggerFFTLogicChange(e.target.value));
         
+        // Initialize Cursors listeners
+        this.initCursors();
+
         // Load default mock waveforms on startup
         this.loadDefaultMockWaveforms();
         
@@ -1473,6 +1504,222 @@ class OscilloscopeApp {
         else if (channel === 'CH2') this.verticalOffsetDivCh2 = val;
         else this.verticalOffsetDivMath = val;
     }
+
+    // --- Interactive Cursors: Math & Scale Mappings ---
+
+    getChannelViewport(channelName) {
+        const height = this.canvas.height;
+        if (this.layoutMode === 'split') {
+            const splitY = height / 2;
+            if (channelName === 'CH1') {
+                return { vy: 0, vh: splitY };
+            } else if (channelName === 'CH2') {
+                return { vy: splitY, vh: splitY };
+            } else if (channelName === 'MATH') {
+                if (this.ch2Enable.checked) {
+                    return { vy: 0, vh: splitY };
+                } else {
+                    return { vy: splitY, vh: splitY };
+                }
+            }
+        } else {
+            return { vy: 0, vh: height };
+        }
+    }
+
+    getChannelFFTEnabled(channelName) {
+        if (channelName === 'CH1') return this.fftEnabledCh1;
+        if (channelName === 'CH2') return this.fftEnabledCh2;
+        return this.fftEnabledMath;
+    }
+
+    getChannelEnabled(channelName) {
+        if (channelName === 'CH1') return this.ch1Enable.checked;
+        if (channelName === 'CH2') return this.ch2Enable.checked;
+        return this.mathEnable.checked;
+    }
+
+    getChannelColor(channelName) {
+        if (channelName === 'CH1') return '#00ff66';
+        if (channelName === 'CH2') return '#00e5ff';
+        return '#bd00ff';
+    }
+
+    canvasXToTime(cx) {
+        const width = this.canvas.width;
+        const timebase = this.HORIZ_VALS[this.currentTimebaseIdx];
+        const screenDuration = timebase * 12;
+        
+        return ((cx - width / 2) / width) * screenDuration;
+    }
+
+
+    canvasXToFreq(cx, channelName) {
+        const width = this.canvas.width;
+        const fftResult = this.lastFFTResult && this.lastFFTResult[channelName];
+        if (!fftResult || !fftResult.frequencies || fftResult.frequencies.length === 0) return 0;
+        
+        const maxFreq = fftResult.frequencies[fftResult.frequencies.length - 1];
+        return (cx / width) * maxFreq;
+    }
+
+    canvasYToChannelValue(cy, channelName) {
+        const viewport = this.getChannelViewport(channelName);
+        if (!viewport) return 0;
+        
+        const { vy, vh } = viewport;
+        const centerY = vy + vh / 2;
+        const bottomY = vy + vh;
+        const dy = vh / 10;
+        
+        const voltbase = this.getVoltbaseValue(channelName);
+        const isFFT = this.getChannelFFTEnabled(channelName);
+        const offsetDiv = this.getVerticalOffset(channelName);
+        
+        if (isFFT) {
+            if (this.fftVerticalBase === 'dBrms') {
+                const div = (centerY - cy) / dy;
+                return div * voltbase + (offsetDiv * voltbase * 5);
+            } else {
+                const div = (bottomY - cy) / dy;
+                return (div - offsetDiv) * voltbase;
+            }
+        } else {
+            const div = (centerY - cy) / dy;
+            return (div - offsetDiv) * voltbase;
+        }
+    }
+
+    timeToCanvasX(t) {
+        const width = this.canvas.width;
+        const timebase = this.HORIZ_VALS[this.currentTimebaseIdx];
+        const screenDuration = timebase * 12;
+        
+        return ((t / screenDuration) * width) + (width / 2);
+    }
+
+    freqToCanvasX(f, channelName) {
+        const width = this.canvas.width;
+        const fftResult = this.lastFFTResult && this.lastFFTResult[channelName];
+        if (!fftResult || !fftResult.frequencies || fftResult.frequencies.length === 0) return 0;
+        
+        const maxFreq = fftResult.frequencies[fftResult.frequencies.length - 1];
+        return (f / maxFreq) * width;
+    }
+
+    channelValueToCanvasY(val, channelName) {
+        const viewport = this.getChannelViewport(channelName);
+        if (!viewport) return 0;
+        
+        const { vy, vh } = viewport;
+        const centerY = vy + vh / 2;
+        const bottomY = vy + vh;
+        const dy = vh / 10;
+        
+        const voltbase = this.getVoltbaseValue(channelName);
+        const isFFT = this.getChannelFFTEnabled(channelName);
+        const offsetDiv = this.getVerticalOffset(channelName);
+        
+        if (isFFT) {
+            if (this.fftVerticalBase === 'dBrms') {
+                const div = (val - (offsetDiv * voltbase * 5)) / voltbase;
+                return centerY - div * dy;
+            } else {
+                const div = (val / voltbase) + offsetDiv;
+                return bottomY - div * dy;
+            }
+        } else {
+            const div = (val / voltbase) + offsetDiv;
+            return centerY - div * dy;
+        }
+    }
+
+    getChannelValueAtX(channelName, xVal) {
+        let timeData, voltageData, isFFT;
+        if (channelName === 'CH1') {
+            timeData = this.timeData1;
+            voltageData = this.voltageData1;
+            isFFT = this.fftEnabledCh1;
+        } else if (channelName === 'CH2') {
+            timeData = this.timeData2;
+            voltageData = this.voltageData2;
+            isFFT = this.fftEnabledCh2;
+        } else if (channelName === 'MATH') {
+            timeData = this.timeDataMath;
+            voltageData = this.voltageDataMath;
+            isFFT = this.fftEnabledMath;
+        }
+        
+        if (!timeData || timeData.length === 0) return null;
+        
+        if (isFFT) {
+            const fftResult = this.lastFFTResult && this.lastFFTResult[channelName];
+            if (!fftResult || !fftResult.frequencies || fftResult.frequencies.length === 0) return null;
+            
+            let low = 0, high = fftResult.frequencies.length - 1;
+            let closestIdx = 0;
+            let minDiff = Infinity;
+            while (low <= high) {
+                const mid = (low + high) >> 1;
+                const diff = Math.abs(fftResult.frequencies[mid] - xVal);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    closestIdx = mid;
+                }
+                if (fftResult.frequencies[mid] < xVal) {
+                    low = mid + 1;
+                } else {
+                    high = mid - 1;
+                }
+            }
+            return fftResult.magnitudes[closestIdx];
+        } else {
+            const timebase = this.HORIZ_VALS[this.currentTimebaseIdx];
+            const screenDuration = timebase * 12;
+            
+            const startT = timeData[0];
+            const endT = timeData[timeData.length - 1];
+            const totalDuration = endT - startT;
+            
+            let viewportStartT;
+            if (this.mode === 'realtime') {
+                viewportStartT = Math.max(startT, endT - screenDuration);
+            } else {
+                viewportStartT = startT + (this.horizontalPosition * Math.max(0, totalDuration - screenDuration));
+            }
+            
+            const tAbsolute = viewportStartT + xVal + (screenDuration / 2);
+            
+            let low = 0, high = timeData.length - 1;
+            let closestIdx = 0;
+            let minDiff = Infinity;
+            while (low <= high) {
+                const mid = (low + high) >> 1;
+                const diff = Math.abs(timeData[mid] - tAbsolute);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    closestIdx = mid;
+                }
+                if (timeData[mid] < tAbsolute) {
+                    low = mid + 1;
+                } else {
+                    high = mid - 1;
+                }
+            }
+            return voltageData[closestIdx];
+        }
+    }
+
+    formatVoltage(v, isFFT) {
+        if (isFFT && this.fftVerticalBase === 'dBrms') {
+            return `${v.toFixed(2)} dB`;
+        }
+        const absV = Math.abs(v);
+        if (absV === 0) return '0.00 V';
+        if (absV < 1e-3) return `${(v * 1e6).toFixed(1)} µV`;
+        if (absV < 1.0) return `${(v * 1e3).toFixed(1)} mV`;
+        return `${v.toFixed(3)} V`;
+    }
     
     onTimeScroll(value) {
         if (this.isCustomDragging) return;
@@ -1667,6 +1914,12 @@ class OscilloscopeApp {
     }
     
     updateSlidersAndReadouts() {
+        if (!this.triggerLowVolts) {
+            this.triggerLowVolts = { 'CH1': -1.0, 'CH2': -1.0, 'MATH': -1.0 };
+        }
+        if (!this.triggerHighVolts) {
+            this.triggerHighVolts = { 'CH1': 1.0, 'CH2': 1.0, 'MATH': 1.0 };
+        }
         const timebase = this.HORIZ_VALS[this.currentTimebaseIdx];
         this.timebaseVal.textContent = this.formatTime(timebase);
         this.osdTimebase.textContent = this.formatTime(timebase);
@@ -2222,6 +2475,19 @@ class OscilloscopeApp {
             this.ctx.stroke();
             this.ctx.restore();
         }
+        
+        // --- Interactive Cursors: Recalculate, Sync, Draw, Tooltip ---
+        if (this.cursorsEnabled) {
+            this.recalculateCursorCoords(this.cursor1);
+            this.recalculateCursorCoords(this.cursor2);
+            this.syncCursorSliders();
+            this.drawCursors();
+            this.updateCursorTooltip();
+        } else {
+            if (this.cursorTooltip) {
+                this.cursorTooltip.classList.add('hide');
+            }
+        }
     }
     
     drawTrace(channelId, vx, vy, vw, vh) {
@@ -2318,6 +2584,8 @@ class OscilloscopeApp {
             if (!fftResult) return;
             
             const { frequencies, magnitudes } = fftResult;
+            if (!this.lastFFTResult) this.lastFFTResult = {};
+            this.lastFFTResult[chanName] = fftResult;
             const numBins = magnitudes.length;
             if (numBins <= 0) return;
             
@@ -2602,6 +2870,476 @@ class OscilloscopeApp {
         
         this.timeScroll.addEventListener('pointerup', endDrag);
         this.timeScroll.addEventListener('pointercancel', endDrag);
+    }
+
+    // --- Interactive Cursors: Event Bindings & Lifecycle ---
+
+    initCursors() {
+        // 1. Checkbox Enable/Disable
+        this.cursorsEnableCheckbox.addEventListener('change', () => {
+            this.cursorsEnabled = this.cursorsEnableCheckbox.checked;
+            if (!this.cursorsEnabled) {
+                this.resetCursors();
+            }
+            this.updateCursorCSS();
+            this.updateCursorUIVisibility();
+            this.drawOscilloscope();
+        });
+        
+        // 2. Channel Visible Selection Checkboxes
+        this.cursorCh1Enable.addEventListener('change', () => {
+            this.cursorChEnabled['CH1'] = this.cursorCh1Enable.checked;
+            this.drawOscilloscope();
+        });
+        this.cursorCh2Enable.addEventListener('change', () => {
+            this.cursorChEnabled['CH2'] = this.cursorCh2Enable.checked;
+            this.drawOscilloscope();
+        });
+        this.cursorMathEnable.addEventListener('change', () => {
+            this.cursorChEnabled['MATH'] = this.cursorMathEnable.checked;
+            this.drawOscilloscope();
+        });
+        
+        // 3. Channel Tracking Mode Selects
+        this.cursorCh1Track.addEventListener('change', () => {
+            this.cursorTrackingMode['CH1'] = this.cursorCh1Track.value;
+            this.drawOscilloscope();
+        });
+        this.cursorCh2Track.addEventListener('change', () => {
+            this.cursorTrackingMode['CH2'] = this.cursorCh2Track.value;
+            this.drawOscilloscope();
+        });
+        this.cursorMathTrack.addEventListener('change', () => {
+            this.cursorTrackingMode['MATH'] = this.cursorMathTrack.value;
+            this.drawOscilloscope();
+        });
+        
+        // 4. Cursor position sliders
+        const handleXSliderInput = (cursor, slider) => {
+            if (!cursor) return;
+            const pct = parseFloat(slider.value);
+            const cx = (pct / 100) * this.canvas.width;
+            cursor.time = this.canvasXToTime(cx);
+            cursor.freq = this.canvasXToFreq(cx, cursor.activeCh);
+            cursor.x = cx;
+            this.drawOscilloscope();
+        };
+        
+        const handleYSliderInput = (cursor, slider) => {
+            if (!cursor) return;
+            const pct = parseFloat(slider.value);
+            const viewport = this.getChannelViewport(cursor.activeCh);
+            const cy = viewport.vy + ((100 - pct) / 100) * viewport.vh;
+            cursor.posValue = this.canvasYToChannelValue(cy, cursor.activeCh);
+            cursor.y = cy;
+            this.drawOscilloscope();
+        };
+        
+        this.cursor1XSlider.addEventListener('input', () => handleXSliderInput(this.cursor1, this.cursor1XSlider));
+        this.cursor1YSlider.addEventListener('input', () => handleYSliderInput(this.cursor1, this.cursor1YSlider));
+        this.cursor2XSlider.addEventListener('input', () => handleXSliderInput(this.cursor2, this.cursor2XSlider));
+        this.cursor2YSlider.addEventListener('input', () => handleYSliderInput(this.cursor2, this.cursor2YSlider));
+        
+        // 5. Reset button
+        this.cursorResetBtn.addEventListener('click', () => {
+            this.resetCursors();
+            this.updateCursorUIVisibility();
+            this.drawOscilloscope();
+        });
+        
+        // 6. Pointer events on the canvas
+        this.canvas.addEventListener('pointermove', (e) => {
+            if (!this.cursorsEnabled) return;
+            const rect = this.canvas.getBoundingClientRect();
+            const cx = Math.max(0, Math.min(this.canvas.width, e.clientX - rect.left));
+            const cy = Math.max(0, Math.min(this.canvas.height, e.clientY - rect.top));
+            
+            // Update temporary cursor following mouse if < 2 locked cursors
+            if (this.cursor1 === null || this.cursor2 === null) {
+                this.tempCursor = {
+                    x: cx,
+                    y: cy,
+                    time: this.canvasXToTime(cx),
+                    freq: this.canvasXToFreq(cx, this.activeTab),
+                    posValue: this.canvasYToChannelValue(cy, this.activeTab),
+                    activeCh: this.activeTab
+                };
+            } else {
+                this.tempCursor = null;
+            }
+            this.drawOscilloscope();
+        });
+        
+        this.canvas.addEventListener('pointerdown', (e) => {
+            if (!this.cursorsEnabled || e.button !== 0) return;
+            const rect = this.canvas.getBoundingClientRect();
+            const cx = Math.max(0, Math.min(this.canvas.width, e.clientX - rect.left));
+            const cy = Math.max(0, Math.min(this.canvas.height, e.clientY - rect.top));
+            
+            if (this.cursor1 === null) {
+                this.cursor1 = {
+                    x: cx,
+                    y: cy,
+                    time: this.canvasXToTime(cx),
+                    freq: this.canvasXToFreq(cx, this.activeTab),
+                    posValue: this.canvasYToChannelValue(cy, this.activeTab),
+                    activeCh: this.activeTab
+                };
+                this.tempCursor = null;
+                this.updateCursorUIVisibility();
+                this.syncCursorSliders();
+            } else if (this.cursor2 === null) {
+                this.cursor2 = {
+                    x: cx,
+                    y: cy,
+                    time: this.canvasXToTime(cx),
+                    freq: this.canvasXToFreq(cx, this.activeTab),
+                    posValue: this.canvasYToChannelValue(cy, this.activeTab),
+                    activeCh: this.activeTab
+                };
+                this.tempCursor = null;
+                this.updateCursorUIVisibility();
+                this.syncCursorSliders();
+            }
+            this.drawOscilloscope();
+        });
+        
+        this.canvas.addEventListener('pointerleave', () => {
+            if (!this.cursorsEnabled) return;
+            this.tempCursor = null;
+            this.drawOscilloscope();
+        });
+        
+        // Initial setup for the pointer cursor CSS style
+        this.updateCursorCSS();
+    }
+    
+    updateCursorCSS() {
+        if (this.cursorsEnabled) {
+            this.canvas.style.cursor = 'crosshair';
+        } else {
+            this.canvas.style.cursor = 'default';
+        }
+    }
+    
+    resetCursors() {
+        this.cursor1 = null;
+        this.cursor2 = null;
+        this.tempCursor = null;
+        
+        // Hide sliders
+        this.cursorSlidersGroup.classList.add('hide');
+        this.cursor1Sliders.classList.add('hide');
+        this.cursor2Sliders.classList.add('hide');
+        
+        // Hide tooltip
+        this.cursorTooltip.classList.add('hide');
+    }
+    
+    updateCursorUIVisibility() {
+        if (this.cursorsEnabled) {
+            this.cursorChannelSelects.classList.remove('hide');
+            this.cursorButtons.classList.remove('hide');
+            
+            if (this.cursor1 || this.cursor2) {
+                this.cursorSlidersGroup.classList.remove('hide');
+            } else {
+                this.cursorSlidersGroup.classList.add('hide');
+            }
+            
+            if (this.cursor1) {
+                this.cursor1Sliders.classList.remove('hide');
+            } else {
+                this.cursor1Sliders.classList.add('hide');
+            }
+            
+            if (this.cursor2) {
+                this.cursor2Sliders.classList.remove('hide');
+            } else {
+                this.cursor2Sliders.classList.add('hide');
+            }
+        } else {
+            this.cursorChannelSelects.classList.add('hide');
+            this.cursorSlidersGroup.classList.add('hide');
+            this.cursor1Sliders.classList.add('hide');
+            this.cursor2Sliders.classList.add('hide');
+            this.cursorButtons.classList.add('hide');
+            if (this.cursorTooltip) {
+                this.cursorTooltip.classList.add('hide');
+            }
+        }
+    }
+    
+    syncCursorSliders() {
+        // Prevent feedback loop if user is dragging slider
+        if (document.activeElement === this.cursor1XSlider || 
+            document.activeElement === this.cursor1YSlider || 
+            document.activeElement === this.cursor2XSlider || 
+            document.activeElement === this.cursor2YSlider) {
+            return;
+        }
+        
+        if (this.cursor1) {
+            this.cursor1XSlider.value = (this.cursor1.x / this.canvas.width) * 100;
+            
+            const viewport = this.getChannelViewport(this.cursor1.activeCh);
+            this.cursor1YSlider.value = 100 - ((this.cursor1.y - viewport.vy) / viewport.vh) * 100;
+        }
+        if (this.cursor2) {
+            this.cursor2XSlider.value = (this.cursor2.x / this.canvas.width) * 100;
+            
+            const viewport = this.getChannelViewport(this.cursor2.activeCh);
+            this.cursor2YSlider.value = 100 - ((this.cursor2.y - viewport.vy) / viewport.vh) * 100;
+        }
+    }
+    
+    recalculateCursorCoords(cursor) {
+        if (!cursor) return;
+        
+        const isFFT = this.getChannelFFTEnabled(cursor.activeCh);
+        
+        // Recalculate X coordinate
+        if (isFFT) {
+            cursor.x = this.freqToCanvasX(cursor.freq, cursor.activeCh);
+        } else {
+            cursor.x = this.timeToCanvasX(cursor.time);
+        }
+        
+        // Recalculate Y coordinate
+        const trackMode = this.cursorTrackingMode[cursor.activeCh];
+        if (trackMode === 'track') {
+            const xPhysical = isFFT ? cursor.freq : cursor.time;
+            const traceVal = this.getChannelValueAtX(cursor.activeCh, xPhysical);
+            if (traceVal !== null) {
+                cursor.y = this.channelValueToCanvasY(traceVal, cursor.activeCh);
+            } else {
+                cursor.y = this.channelValueToCanvasY(cursor.posValue, cursor.activeCh);
+            }
+        } else {
+            cursor.y = this.channelValueToCanvasY(cursor.posValue, cursor.activeCh);
+        }
+    }
+    
+    drawCursors() {
+        if (!this.cursorsEnabled) return;
+        
+        if (this.cursor1) {
+            this.drawSingleCursor(this.cursor1, '#ffaa00', 'C1');
+        }
+        if (this.cursor2) {
+            this.drawSingleCursor(this.cursor2, '#ff5500', 'C2');
+        }
+        if (this.tempCursor) {
+            this.drawSingleCursor(this.tempCursor, 'rgba(255, 255, 255, 0.45)', 'T');
+        }
+    }
+    
+    drawSingleCursor(cursor, color, label) {
+        if (!cursor) return;
+        
+        const width = this.canvas.width;
+        const height = this.canvas.height;
+        
+        this.ctx.save();
+        
+        // 1. Draw full-height vertical line
+        this.ctx.beginPath();
+        this.ctx.setLineDash([4, 4]);
+        this.ctx.moveTo(cursor.x, 0);
+        this.ctx.lineTo(cursor.x, height);
+        this.ctx.strokeStyle = color;
+        this.ctx.lineWidth = 1;
+        this.ctx.stroke();
+        
+        // 2. Draw label at the top
+        this.ctx.beginPath();
+        this.ctx.setLineDash([]);
+        this.ctx.fillStyle = color;
+        this.ctx.font = 'bold 10px Inter, Roboto, sans-serif';
+        this.ctx.fillText(label, cursor.x + 5, 14);
+        
+        // 3. Draw horizontal lines or trace tracking squares for enabled channels
+        for (const ch of ['CH1', 'CH2', 'MATH']) {
+            if (!this.getChannelEnabled(ch) || !this.cursorChEnabled[ch]) continue;
+            
+            const isFFT = this.getChannelFFTEnabled(ch);
+            const trackMode = this.cursorTrackingMode[ch];
+            const chColor = this.getChannelColor(ch);
+            
+            if (trackMode === 'track') {
+                const xPhysical = isFFT ? cursor.freq : cursor.time;
+                const traceVal = this.getChannelValueAtX(ch, xPhysical);
+                if (traceVal !== null) {
+                    const cyTrack = this.channelValueToCanvasY(traceVal, ch);
+                    
+                    this.ctx.save();
+                    this.ctx.setLineDash([]);
+                    this.ctx.fillStyle = chColor;
+                    this.ctx.strokeStyle = '#ffffff';
+                    this.ctx.lineWidth = 1.5;
+                    
+                    this.ctx.shadowBlur = 8;
+                    this.ctx.shadowColor = chColor;
+                    
+                    const size = 8;
+                    this.ctx.fillRect(cursor.x - size / 2, cyTrack - size / 2, size, size);
+                    this.ctx.strokeRect(cursor.x - size / 2, cyTrack - size / 2, size, size);
+                    this.ctx.restore();
+                }
+            } else {
+                const cy = this.channelValueToCanvasY(cursor.posValue, ch);
+                
+                this.ctx.beginPath();
+                this.ctx.setLineDash([4, 4]);
+                this.ctx.moveTo(0, cy);
+                this.ctx.lineTo(width, cy);
+                this.ctx.strokeStyle = color + '7a'; // Semi-transparent
+                this.ctx.lineWidth = 0.8;
+                this.ctx.stroke();
+            }
+        }
+        
+        this.ctx.restore();
+    }
+    
+    updateCursorTooltip() {
+        let c1 = null;
+        let c2 = null;
+        let isComparison = false;
+        
+        if (this.cursor1 && this.cursor2) {
+            c1 = this.cursor1;
+            c2 = this.cursor2;
+            isComparison = true;
+        } else if (this.cursor1 && this.tempCursor) {
+            c1 = this.cursor1;
+            c2 = this.tempCursor;
+            isComparison = true;
+        } else if (this.cursor1) {
+            c1 = this.cursor1;
+            c2 = null;
+            isComparison = false;
+        } else if (this.tempCursor) {
+            c1 = this.tempCursor;
+            c2 = null;
+            isComparison = false;
+        }
+        
+        if (!c1) {
+            this.cursorTooltip.classList.add('hide');
+            return;
+        }
+        
+        let html = '';
+        let title;
+        if (this.cursor1 && this.cursor2) {
+            title = 'Cursors Locked';
+        } else if (this.cursor1) {
+            title = 'Lock Cursor 2';
+        } else {
+            title = 'Lock Cursor 1';
+        }
+        
+        html += `<div class="tooltip-header">${title}</div>`;
+        html += `<table>`;
+        
+        let showTime = false;
+        let showFreq = false;
+        
+        for (const ch of ['CH1', 'CH2', 'MATH']) {
+            if (this.getChannelEnabled(ch) && this.cursorChEnabled[ch]) {
+                if (this.getChannelFFTEnabled(ch)) showFreq = true;
+                else showTime = true;
+            }
+        }
+        
+        if (!showTime && !showFreq) showTime = true;
+        
+        if (isComparison && c2) {
+            const col2Label = 'C1';
+            const col3Label = (this.cursor2) ? 'C2' : 'T';
+            
+            html += `<thead><tr style="border-bottom: 1px solid rgba(255,255,255,0.1);"><td style="color: #888;">Param</td><td style="color: #ffaa00; text-align: right;">${col2Label}</td><td style="color: #ff5500; text-align: right;">${col3Label}</td><td style="color: #bd00ff; text-align: right;">Δ</td></tr></thead>`;
+            html += `<tbody>`;
+            
+            if (showTime) {
+                const deltaT = Math.abs(c2.time - c1.time);
+                html += `<tr><td style="color: #aaa;">Time</td><td style="text-align: right;">${this.formatTime(c1.time)}</td><td style="text-align: right;">${this.formatTime(c2.time)}</td><td class="cursor-delta" style="text-align: right; border-top: none; padding-top: 3px;">${this.formatTime(deltaT)}</td></tr>`;
+            }
+            
+            if (showFreq) {
+                const deltaF = Math.abs(c2.freq - c1.freq);
+                html += `<tr><td style="color: #aaa;">Freq</td><td style="text-align: right;">${this.formatFreq(c1.freq)}</td><td style="text-align: right;">${this.formatFreq(c2.freq)}</td><td class="cursor-delta" style="text-align: right; border-top: none; padding-top: 3px;">${this.formatFreq(deltaF)}</td></tr>`;
+            }
+            
+            for (const ch of ['CH1', 'CH2', 'MATH']) {
+                if (this.getChannelEnabled(ch) && this.cursorChEnabled[ch]) {
+                    const chClass = ch === 'CH1' ? 'channel-ch1' : (ch === 'CH2' ? 'channel-ch2' : 'channel-math');
+                    const isFftCh = this.getChannelFFTEnabled(ch);
+                    
+                    const xVal1 = isFftCh ? c1.freq : c1.time;
+                    const val1 = this.getChannelValueAtX(ch, xVal1);
+                    const strVal1 = val1 !== null ? this.formatVoltage(val1, isFftCh) : '--';
+                    
+                    const xVal2 = isFftCh ? c2.freq : c2.time;
+                    const val2 = this.getChannelValueAtX(ch, xVal2);
+                    const strVal2 = val2 !== null ? this.formatVoltage(val2, isFftCh) : '--';
+                    
+                    let strDelta = '--';
+                    if (val1 !== null && val2 !== null) {
+                        strDelta = this.formatVoltage(Math.abs(val2 - val1), isFftCh);
+                    }
+                    
+                    html += `<tr><td class="${chClass}">${ch}</td><td style="text-align: right;">${strVal1}</td><td style="text-align: right;">${strVal2}</td><td class="cursor-delta" style="text-align: right; border-top: none; padding-top: 3px;">${strDelta}</td></tr>`;
+                }
+            }
+            
+            const activeCh = this.activeTab;
+            const isFftActive = this.getChannelFFTEnabled(activeCh);
+            const strPos1 = this.formatVoltage(c1.posValue, isFftActive);
+            const strPos2 = this.formatVoltage(c2.posValue, isFftActive);
+            const deltaPos = Math.abs(c2.posValue - c1.posValue);
+            const strDeltaPos = this.formatVoltage(deltaPos, isFftActive);
+            
+            html += `<tr style="border-top: 1px dashed rgba(255,255,255,0.15);"><td style="color: #ffaa00;">POS</td><td style="text-align: right; color: #ffaa00;">${strPos1}</td><td style="text-align: right; color: #ffaa00;">${strPos2}</td><td class="cursor-delta" style="text-align: right; border-top: none; padding-top: 3.5px;">${strDeltaPos}</td></tr>`;
+            
+        } else {
+            html += `<tbody>`;
+            
+            if (showTime) {
+                html += `<tr><td style="color: #aaa;">Time:</td><td style="text-align: right;">${this.formatTime(c1.time)}</td></tr>`;
+            }
+            
+            if (showFreq) {
+                html += `<tr><td style="color: #aaa;">Freq:</td><td style="text-align: right;">${this.formatFreq(c1.freq)}</td></tr>`;
+            }
+            
+            for (const ch of ['CH1', 'CH2', 'MATH']) {
+                if (this.getChannelEnabled(ch) && this.cursorChEnabled[ch]) {
+                    const chClass = ch === 'CH1' ? 'channel-ch1' : (ch === 'CH2' ? 'channel-ch2' : 'channel-math');
+                    const isFftCh = this.getChannelFFTEnabled(ch);
+                    const xVal = isFftCh ? c1.freq : c1.time;
+                    const val = this.getChannelValueAtX(ch, xVal);
+                    const strVal = val !== null ? this.formatVoltage(val, isFftCh) : '--';
+                    
+                    html += `<tr><td class="${chClass}">${ch}:</td><td style="text-align: right;">${strVal}</td></tr>`;
+                }
+            }
+            
+            const activeCh = this.activeTab;
+            const isFftActive = this.getChannelFFTEnabled(activeCh);
+            const strPos = this.formatVoltage(c1.posValue, isFftActive);
+            
+            html += `<tr style="border-top: 1px dashed rgba(255,255,255,0.15);"><td style="color: #ffaa00;">POS:</td><td style="text-align: right; color: #ffaa00;">${strPos}</td></tr>`;
+        }
+        
+        html += `</tbody></table>`;
+        this.cursorTooltip.innerHTML = html;
+        
+        // Position the glassmorphic tooltip (fixed at the bottom right via CSS)
+        this.cursorTooltip.classList.remove('hide');
+        this.cursorTooltip.style.left = '';
+        this.cursorTooltip.style.top = '';
     }
 }
 

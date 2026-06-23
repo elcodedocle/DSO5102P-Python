@@ -42,8 +42,8 @@ Implemented and tested functions:
 ## Web oscilloscope
 
 Uses FastAPI and websockets to stream chunks of ReadSampleData to a nice web GUI with some processing (Triggers, FFT,
-(split) display and playback controls, and a MATH virtual channel). No fancy webgl shaders/rasterization rendering; Just
-a regular HTML canvas.
+(split) display and playback controls, cursors, and a MATH virtual channel). No fancy webgl shaders/rasterization
+rendering; Just a regular HTML canvas.
 
 ```bash
 pip install -r requirements.txt # (or equivalent for your venv)
