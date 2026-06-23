@@ -873,7 +873,8 @@ class OscilloscopeApp {
         
         try {
             const res = await fetch('/api/live/start', { method: 'POST' });
-            await res.json();
+            const data = await res.json();
+            this.streamSessionId = data.session_id;
             
             // Pre-fetch active settings to synchronize the UI timebase and voltbase immediately
             try {
@@ -958,7 +959,13 @@ class OscilloscopeApp {
             this.websocketCh2 = null;
         }
         
-        await fetch('/api/live/stop', { method: 'POST' });
+        let url = '/api/live/stop';
+        if (this.streamSessionId !== undefined && this.streamSessionId !== null) {
+            url += `?session_id=${this.streamSessionId}`;
+        }
+        await fetch(url, { method: 'POST' });
+        this.streamSessionId = null;
+        
         this.statusText.textContent = "Live feeds stopped";
         this.statusText.className = "status-wait";
     }
