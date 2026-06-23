@@ -242,6 +242,37 @@ class OscilloscopeApp {
         this.tempCursor = null;
         this.lastFFTResult = { 'CH1': null, 'CH2': null, 'MATH': null };
 
+        // Metrics DOM references
+        this.metricsCh1Enable = document.getElementById('metrics-ch1-enable');
+        this.metricsCh2Enable = document.getElementById('metrics-ch2-enable');
+        this.metricsMathEnable = document.getElementById('metrics-math-enable');
+        this.metricsLayoutSelector = document.getElementById('metrics-layout-selector');
+        this.metricsAutoresetEnable = document.getElementById('metrics-autoreset-enable');
+        this.metricsAutoresetSliderGroup = document.getElementById('metrics-autoreset-slider-group');
+        this.metricsAutoresetSlider = document.getElementById('metrics-autoreset-slider');
+        this.metricsAutoresetVal = document.getElementById('metrics-autoreset-val');
+        this.metricsResetBtn = document.getElementById('metrics-reset-btn');
+
+        // Metrics state properties
+        this.metricsEnabledCh1 = this.metricsCh1Enable ? this.metricsCh1Enable.checked : false;
+        this.metricsEnabledCh2 = this.metricsCh2Enable ? this.metricsCh2Enable.checked : false;
+        this.metricsEnabledMath = this.metricsMathEnable ? this.metricsMathEnable.checked : false;
+        this.metricsLayout = this.metricsLayoutSelector ? this.metricsLayoutSelector.value : 'bottom_overlay';
+        this.metricsAutoResetEnabled = this.metricsAutoresetEnable ? this.metricsAutoresetEnable.checked : false;
+        this.metricsAutoResetMult = 1;
+
+        // Metrics accumulators
+        this.metricsAccumulator = {
+            CH1: { count: 0, mean: 0, min: Infinity, max: -Infinity, startTime: null },
+            CH2: { count: 0, mean: 0, min: Infinity, max: -Infinity, startTime: null },
+            MATH: { count: 0, mean: 0, min: Infinity, max: -Infinity, startTime: null }
+        };
+        this.maxProcessedTime = {
+            CH1: -Infinity,
+            CH2: -Infinity,
+            MATH: -Infinity
+        };
+
         this.init();
     }
     
@@ -337,6 +368,63 @@ class OscilloscopeApp {
         
         // Initialize Cursors listeners
         this.initCursors();
+
+        // Initialize Metrics listeners
+        if (this.metricsCh1Enable) {
+            this.metricsCh1Enable.addEventListener('change', (e) => {
+                this.metricsEnabledCh1 = e.target.checked;
+                this.drawOscilloscope();
+            });
+        }
+        if (this.metricsCh2Enable) {
+            this.metricsCh2Enable.addEventListener('change', (e) => {
+                this.metricsEnabledCh2 = e.target.checked;
+                this.drawOscilloscope();
+            });
+        }
+        if (this.metricsMathEnable) {
+            this.metricsMathEnable.addEventListener('change', (e) => {
+                this.metricsEnabledMath = e.target.checked;
+                this.drawOscilloscope();
+            });
+        }
+        if (this.metricsLayoutSelector) {
+            this.metricsLayoutSelector.addEventListener('change', (e) => {
+                this.metricsLayout = e.target.value;
+                this.drawOscilloscope();
+            });
+        }
+        if (this.metricsAutoresetEnable) {
+            this.metricsAutoresetEnable.addEventListener('change', (e) => {
+                this.metricsAutoResetEnabled = e.target.checked;
+                if (this.metricsAutoresetSliderGroup) {
+                    this.metricsAutoresetSliderGroup.style.display = e.target.checked ? 'block' : 'none';
+                }
+                this.updateMetricsSliderLabel();
+                this.drawOscilloscope();
+            });
+        }
+        if (this.metricsAutoresetSlider) {
+            this.metricsAutoresetSlider.addEventListener('input', (e) => {
+                const idx = parseInt(e.target.value, 10);
+                const mults = [1, 2, 4, 8, 16, 32];
+                this.metricsAutoResetMult = mults[idx];
+                this.updateMetricsSliderLabel();
+                this.drawOscilloscope();
+            });
+        }
+        if (this.metricsResetBtn) {
+            this.metricsResetBtn.addEventListener('click', () => {
+                this.resetMetrics();
+                this.drawOscilloscope();
+            });
+        }
+
+        // Sync initial UI display
+        if (this.metricsAutoresetEnable && this.metricsAutoresetSliderGroup) {
+            this.metricsAutoresetSliderGroup.style.display = this.metricsAutoResetEnabled ? 'block' : 'none';
+            this.updateMetricsSliderLabel();
+        }
 
         // Load default mock waveforms on startup
         this.loadDefaultMockWaveforms();
@@ -1545,8 +1633,15 @@ class OscilloscopeApp {
         return '#bd00ff';
     }
 
+    getWaveWidth() {
+        if (this.metricsLayout === 'right_split' && (this.metricsEnabledCh1 || this.metricsEnabledCh2 || this.metricsEnabledMath)) {
+            return this.canvas.width - 220;
+        }
+        return this.canvas.width;
+    }
+
     canvasXToTime(cx) {
-        const width = this.canvas.width;
+        const width = this.getWaveWidth();
         const timebase = this.HORIZ_VALS[this.currentTimebaseIdx];
         const screenDuration = timebase * 12;
         
@@ -1555,7 +1650,7 @@ class OscilloscopeApp {
 
 
     canvasXToFreq(cx, channelName) {
-        const width = this.canvas.width;
+        const width = this.getWaveWidth();
         const fftResult = this.lastFFTResult && this.lastFFTResult[channelName];
         if (!fftResult || !fftResult.frequencies || fftResult.frequencies.length === 0) return 0;
         
@@ -1591,7 +1686,7 @@ class OscilloscopeApp {
     }
 
     timeToCanvasX(t) {
-        const width = this.canvas.width;
+        const width = this.getWaveWidth();
         const timebase = this.HORIZ_VALS[this.currentTimebaseIdx];
         const screenDuration = timebase * 12;
         
@@ -1599,7 +1694,7 @@ class OscilloscopeApp {
     }
 
     freqToCanvasX(f, channelName) {
-        const width = this.canvas.width;
+        const width = this.getWaveWidth();
         const fftResult = this.lastFFTResult && this.lastFFTResult[channelName];
         if (!fftResult || !fftResult.frequencies || fftResult.frequencies.length === 0) return 0;
         
@@ -2067,11 +2162,36 @@ class OscilloscopeApp {
             this.postTriggerAuto.checked = false;
         }
         
+        this.updateMetricsSliderLabel();
         this.renderOSD();
     }
     
     renderOSD() {
         this.osdLeftContainer.innerHTML = '';
+        
+        // 1. Dynamic padding / positioning of OSD right overlay (based on right metrics split)
+        const waveWidth = this.getWaveWidth();
+        const splitOffset = this.canvas.width - waveWidth;
+        const osdOverlay = document.getElementById('osd-overlay');
+        if (osdOverlay) {
+            osdOverlay.style.right = `${25 + splitOffset}px`;
+        }
+
+        const isSplitLayout = this.layoutMode === 'split';
+        if (isSplitLayout) {
+            this.osdLeftContainer.style.position = 'absolute';
+            this.osdLeftContainer.style.top = '-25px';
+            this.osdLeftContainer.style.left = '0';
+            this.osdLeftContainer.style.width = '100%';
+        } else {
+            this.osdLeftContainer.style.position = '';
+            this.osdLeftContainer.style.top = '';
+            this.osdLeftContainer.style.left = '';
+            this.osdLeftContainer.style.width = '';
+        }
+
+        const vyCount = {};
+
         const channels = ['CH1', 'CH2', 'MATH'];
         channels.forEach(ch => {
             let isDisplayed = false;
@@ -2137,6 +2257,20 @@ class OscilloscopeApp {
                 
                 const block = document.createElement('div');
                 block.className = 'osd-col';
+                
+                let extraStyles = '';
+                if (isSplitLayout) {
+                    const { vy } = this.getChannelViewport(ch);
+                    if (!vyCount[vy]) {
+                        vyCount[vy] = 0;
+                    }
+                    const blockIndex = vyCount[vy];
+                    vyCount[vy]++;
+                    
+                    const leftOffset = blockIndex * 195;
+                    extraStyles = `position: absolute; top: ${vy + 25}px; left: ${leftOffset}px; width: 180px; box-sizing: border-box;`;
+                }
+                
                 block.setAttribute('style', `
                     color: ${color};
                     border-color: ${borderColor};
@@ -2145,6 +2279,7 @@ class OscilloscopeApp {
                     padding: 6px 12px;
                     border-radius: 4px;
                     border: 1px solid ${borderColor};
+                    ${extraStyles}
                 `);
                 
                 block.innerHTML = `
@@ -2318,15 +2453,25 @@ class OscilloscopeApp {
     }
     
     drawOscilloscope() {
-        const width = this.canvas.width;
+        const fullWidth = this.canvas.width;
         const height = this.canvas.height;
         
         // Dark screen background
         this.ctx.fillStyle = '#020502';
-        this.ctx.fillRect(0, 0, width, height);
+        this.ctx.fillRect(0, 0, fullWidth, height);
         
+        // Process measurements before drawing, so we have fresh metrics
+        this.processMetrics();
+        
+        const width = this.getWaveWidth();
         const horizDivs = 12;
         const vertDivs = 10;
+        
+        this.ctx.save();
+        // Clip to the waveform area
+        this.ctx.beginPath();
+        this.ctx.rect(0, 0, width, height);
+        this.ctx.clip();
         
         const isSplit = this.layoutMode === 'split';
         
@@ -2488,6 +2633,15 @@ class OscilloscopeApp {
                 this.cursorTooltip.classList.add('hide');
             }
         }
+        
+        // Restore clipping context
+        this.ctx.restore();
+        
+        // Draw metrics (either bottom overlay or right split)
+        this.drawMetrics(width, height, fullWidth);
+        
+        // Synchronize OSD overlays to canvas layout boundaries
+        this.renderOSD();
     }
     
     drawTrace(channelId, vx, vy, vw, vh) {
@@ -2951,7 +3105,7 @@ class OscilloscopeApp {
         this.canvas.addEventListener('pointermove', (e) => {
             if (!this.cursorsEnabled) return;
             const rect = this.canvas.getBoundingClientRect();
-            const cx = Math.max(0, Math.min(this.canvas.width, e.clientX - rect.left));
+            const cx = Math.max(0, Math.min(this.getWaveWidth(), e.clientX - rect.left));
             const cy = Math.max(0, Math.min(this.canvas.height, e.clientY - rect.top));
             
             // Update temporary cursor following mouse if < 2 locked cursors
@@ -2973,7 +3127,7 @@ class OscilloscopeApp {
         this.canvas.addEventListener('pointerdown', (e) => {
             if (!this.cursorsEnabled || e.button !== 0) return;
             const rect = this.canvas.getBoundingClientRect();
-            const cx = Math.max(0, Math.min(this.canvas.width, e.clientX - rect.left));
+            const cx = Math.max(0, Math.min(this.getWaveWidth(), e.clientX - rect.left));
             const cy = Math.max(0, Math.min(this.canvas.height, e.clientY - rect.top));
             
             if (this.cursor1 === null) {
@@ -3137,7 +3291,7 @@ class OscilloscopeApp {
     drawSingleCursor(cursor, color, label) {
         if (!cursor) return;
         
-        const width = this.canvas.width;
+        const width = this.getWaveWidth();
         const height = this.canvas.height;
         
         this.ctx.save();
@@ -3340,6 +3494,407 @@ class OscilloscopeApp {
         this.cursorTooltip.classList.remove('hide');
         this.cursorTooltip.style.left = '';
         this.cursorTooltip.style.top = '';
+    }
+
+    getMetricsEnabled(channel) {
+        if (channel === 'CH1') return this.metricsEnabledCh1;
+        if (channel === 'CH2') return this.metricsEnabledCh2;
+        return this.metricsEnabledMath;
+    }
+
+    updateMetricsSliderLabel() {
+        const mult = this.metricsAutoResetMult || 1;
+        const timebase = this.HORIZ_VALS[this.currentTimebaseIdx];
+        const viewportDuration = timebase * 12;
+        const durationSec = mult * viewportDuration;
+        let durationText;
+        if (durationSec < 1e-6) {
+            durationText = (durationSec * 1e9).toFixed(1) + " ns";
+        } else if (durationSec < 1e-3) {
+            durationText = (durationSec * 1e6).toFixed(1) + " µs";
+        } else if (durationSec < 1.0) {
+            durationText = (durationSec * 1e3).toFixed(1) + " ms";
+        } else {
+            durationText = durationSec.toFixed(2) + " s";
+        }
+        if (this.metricsAutoresetVal) {
+            this.metricsAutoresetVal.textContent = `${mult} VP (${durationText})`;
+        }
+    }
+
+    resetMetrics() {
+        this.metricsAccumulator = {
+            CH1: { count: 0, mean: 0, min: Infinity, max: -Infinity, startTime: null },
+            CH2: { count: 0, mean: 0, min: Infinity, max: -Infinity, startTime: null },
+            MATH: { count: 0, mean: 0, min: Infinity, max: -Infinity, startTime: null }
+        };
+        this.maxProcessedTime = {
+            CH1: -Infinity,
+            CH2: -Infinity,
+            MATH: -Infinity
+        };
+    }
+
+    resetChannelMetrics(channel) {
+        this.metricsAccumulator[channel] = { count: 0, mean: 0, min: Infinity, max: -Infinity, startTime: null };
+        this.maxProcessedTime[channel] = -Infinity;
+    }
+
+    getViewportTimeRange() {
+        const timebase = this.HORIZ_VALS[this.currentTimebaseIdx];
+        const screenDuration = timebase * 12;
+        const mainTimeData = this.timeData1.length > 0 ? this.timeData1 : this.timeData2;
+        if (mainTimeData.length === 0) {
+            return { startT: 0, endT: screenDuration };
+        }
+        const startT = mainTimeData[0];
+        const endT = mainTimeData[mainTimeData.length - 1];
+        const totalDuration = endT - startT;
+        let viewportStartT;
+        if (this.mode === 'realtime') {
+            viewportStartT = Math.max(startT, endT - screenDuration);
+        } else {
+            viewportStartT = startT + (this.horizontalPosition * Math.max(0, totalDuration - screenDuration));
+        }
+        return { startT: viewportStartT, endT: viewportStartT + screenDuration };
+    }
+
+    getViewportSampleBounds(timeData, startT, endT) {
+        let startIndex = 0;
+        let endIndex = timeData.length - 1;
+        
+        let low = 0, high = timeData.length - 1;
+        while (low <= high) {
+            const mid = (low + high) >> 1;
+            if (timeData[mid] >= startT) {
+                startIndex = mid;
+                high = mid - 1;
+            } else {
+                low = mid + 1;
+            }
+        }
+        
+        low = 0;
+        high = timeData.length - 1;
+        while (low <= high) {
+            const mid = (low + high) >> 1;
+            if (timeData[mid] <= endT) {
+                endIndex = mid;
+                low = mid + 1;
+            } else {
+                high = mid - 1;
+            }
+        }
+        
+        return { startIndex, endIndex };
+    }
+
+    processMetrics() {
+        const { startT, endT } = this.getViewportTimeRange();
+        
+        const channels = ['CH1', 'CH2', 'MATH'];
+        channels.forEach(channel => {
+            let timeData, voltageData;
+            if (channel === 'CH1') {
+                timeData = this.timeData1;
+                voltageData = this.voltageData1;
+            } else if (channel === 'CH2') {
+                timeData = this.timeData2;
+                voltageData = this.voltageData2;
+            } else {
+                timeData = this.timeDataMath;
+                voltageData = this.voltageDataMath;
+            }
+            
+            const isMetricsEnabled = this.getMetricsEnabled(channel);
+            const isChanEnabled = this.getChannelEnabled(channel);
+            
+            if (!isMetricsEnabled || !isChanEnabled || !timeData || timeData.length === 0) {
+                return;
+            }
+            
+            if (this.mode === 'realtime') {
+                const len = timeData.length;
+                if (timeData[len - 1] < this.maxProcessedTime[channel]) {
+                    this.resetChannelMetrics(channel);
+                }
+                
+                const acc = this.metricsAccumulator[channel];
+                const timebase = this.HORIZ_VALS[this.currentTimebaseIdx];
+                const viewportDuration = timebase * 12;
+                
+                let low = 0, high = len - 1;
+                let firstNewIdx = len;
+                while (low <= high) {
+                    const mid = (low + high) >> 1;
+                    if (timeData[mid] > this.maxProcessedTime[channel]) {
+                        firstNewIdx = mid;
+                        high = mid - 1;
+                    } else {
+                        low = mid + 1;
+                    }
+                }
+                
+                for (let i = firstNewIdx; i < len; i++) {
+                    const t = timeData[i];
+                    const v = voltageData[i];
+                    
+                    if (this.metricsAutoResetEnabled) {
+                        if (acc.startTime === null) {
+                            acc.startTime = t;
+                        } else {
+                            const limit = this.metricsAutoResetMult * viewportDuration;
+                            if (t - acc.startTime >= limit) {
+                                acc.count = 0;
+                                acc.mean = 0;
+                                acc.min = Infinity;
+                                acc.max = -Infinity;
+                                acc.startTime = t;
+                            }
+                        }
+                    } else {
+                        if (acc.startTime === null) {
+                            acc.startTime = t;
+                        }
+                    }
+                    
+                    acc.count++;
+                    acc.mean = acc.mean + (v - acc.mean) / acc.count;
+                    if (v < acc.min) acc.min = v;
+                    if (v > acc.max) acc.max = v;
+                    
+                    this.maxProcessedTime[channel] = t;
+                }
+            } else {
+                const { startIndex, endIndex } = this.getViewportSampleBounds(timeData, startT, endT);
+                
+                let count = 0;
+                let sum = 0;
+                let min = Infinity;
+                let max = -Infinity;
+                
+                if (startIndex <= endIndex && startIndex < timeData.length && endIndex >= 0) {
+                    for (let i = startIndex; i <= endIndex; i++) {
+                        const v = voltageData[i];
+                        sum += v;
+                        if (v < min) min = v;
+                        if (v > max) max = v;
+                        count++;
+                    }
+                }
+                
+                if (count > 0) {
+                    this.metricsAccumulator[channel] = {
+                        count: count,
+                        mean: sum / count,
+                        min: min,
+                        max: max,
+                        startTime: null
+                    };
+                } else {
+                    this.metricsAccumulator[channel] = {
+                        count: 0,
+                        mean: null,
+                        min: null,
+                        max: null,
+                        startTime: null
+                    };
+                }
+            }
+        });
+    }
+
+    drawMetrics(width, height, fullWidth) {
+        if (this.metricsLayout === 'right_split' && (this.metricsEnabledCh1 || this.metricsEnabledCh2 || this.metricsEnabledMath)) {
+            this.drawRightSplitMetrics(width, height, fullWidth);
+        } else {
+            this.drawBottomOverlayMetrics(width, height);
+        }
+    }
+
+    drawBottomOverlayMetrics(width, height) {
+        const activeChs = ['CH1', 'CH2', 'MATH'].filter(ch => this.getMetricsEnabled(ch) && this.getChannelEnabled(ch));
+        if (activeChs.length === 0) return;
+        
+        this.ctx.fillStyle = 'rgba(5, 10, 5, 0.85)';
+        this.ctx.strokeStyle = 'rgba(0, 255, 102, 0.15)';
+        this.ctx.lineWidth = 1;
+        const barHeight = 45;
+        const barY = height - barHeight - 5;
+        const barX = 10;
+        const barWidth = width - 20;
+        
+        this.ctx.beginPath();
+        this.drawRoundRect(this.ctx, barX, barY, barWidth, barHeight, 6);
+        this.ctx.fill();
+        this.ctx.stroke();
+        
+        const activeCount = activeChs.length;
+        const colWidth = barWidth / activeCount;
+        
+        this.ctx.textBaseline = 'middle';
+        this.ctx.textAlign = 'left';
+        
+        activeChs.forEach((ch, idx) => {
+            const colX = barX + idx * colWidth;
+            
+            if (idx > 0) {
+                this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+                this.ctx.lineWidth = 1;
+                this.ctx.beginPath();
+                this.ctx.moveTo(colX, barY + 5);
+                this.ctx.lineTo(colX, barY + barHeight - 5);
+                this.ctx.stroke();
+            }
+            
+            const textY = barY + barHeight / 2;
+            this.ctx.fillStyle = this.getChannelColor(ch);
+            this.ctx.font = 'bold 12px "Inter", "Roboto", "Outfit", "Helvetica Neue", sans-serif';
+            this.ctx.fillText(ch, colX + 12, textY);
+            
+            const acc = this.metricsAccumulator[ch];
+            const hasData = acc && acc.count > 0 && acc.min !== null && acc.min !== Infinity;
+            
+            const isFFT = this.getChannelFFTEnabled(ch);
+            const strMin = hasData ? this.formatVoltage(acc.min, isFFT) : '--';
+            const strMax = hasData ? this.formatVoltage(acc.max, isFFT) : '--';
+            const strMean = hasData ? this.formatVoltage(acc.mean, isFFT) : '--';
+            const strPkPk = hasData ? this.formatVoltage(Math.abs(acc.max - acc.min), isFFT) : '--';
+            
+            const labelXStart = colX + (activeCount === 3 ? 45 : 55);
+            const itemWidth = (colWidth - (activeCount === 3 ? 55 : 65)) / 4;
+            
+            const items = [
+                { label: 'Min', val: strMin },
+                { label: 'Max', val: strMax },
+                { label: 'Mean', val: strMean },
+                { label: 'Pk-Pk', val: strPkPk }
+            ];
+            
+            items.forEach((item, itemIdx) => {
+                const itemX = labelXStart + itemIdx * itemWidth;
+                
+                this.ctx.font = '10px "Inter", "Roboto", "Outfit", "Helvetica Neue", sans-serif';
+                this.ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+                this.ctx.fillText(item.label, itemX, textY - 8);
+                
+                this.ctx.font = 'bold 11px "Courier New", monospace';
+                this.ctx.fillStyle = hasData ? '#ffffff' : 'rgba(255, 255, 255, 0.3)';
+                this.ctx.fillText(item.val, itemX, textY + 8);
+            });
+        });
+    }
+
+    drawRightSplitMetrics(width, height, fullWidth) {
+        const paneWidth = 220;
+        const paneX = fullWidth - paneWidth;
+        
+        this.ctx.fillStyle = '#050a06';
+        this.ctx.fillRect(paneX, 0, paneWidth, height);
+        
+        this.ctx.strokeStyle = 'rgba(0, 255, 102, 0.2)';
+        this.ctx.lineWidth = 1;
+        this.ctx.beginPath();
+        this.ctx.moveTo(paneX, 0);
+        this.ctx.lineTo(paneX, height);
+        this.ctx.stroke();
+        
+        this.ctx.textBaseline = 'top';
+        this.ctx.textAlign = 'left';
+        this.ctx.fillStyle = '#889588';
+        this.ctx.font = 'bold 10px "Inter", "Roboto", "Outfit", sans-serif';
+        this.ctx.fillText('LIVE MEASUREMENTS', paneX + 15, 15);
+        
+        this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+        this.ctx.beginPath();
+        this.ctx.moveTo(paneX + 15, 32);
+        this.ctx.lineTo(fullWidth - 15, 32);
+        this.ctx.stroke();
+        
+        const activeChs = ['CH1', 'CH2', 'MATH'].filter(ch => this.getMetricsEnabled(ch) && this.getChannelEnabled(ch));
+        
+        if (activeChs.length === 0) {
+            this.ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+            this.ctx.font = 'italic 11px sans-serif';
+            this.ctx.textAlign = 'center';
+            this.ctx.fillText('No active metrics.', paneX + paneWidth / 2, height / 2 - 10);
+            this.ctx.fillText('Enable in sidebar.', paneX + paneWidth / 2, height / 2 + 10);
+            this.ctx.textAlign = 'left';
+            return;
+        }
+        
+        let currentY = 45;
+        const blockHeight = 115;
+        
+        activeChs.forEach(ch => {
+            const chColor = this.getChannelColor(ch);
+            
+            this.ctx.fillStyle = 'rgba(255, 255, 255, 0.02)';
+            this.ctx.beginPath();
+            this.drawRoundRect(this.ctx, paneX + 12, currentY, paneWidth - 24, blockHeight, 6);
+            this.ctx.fill();
+            
+            this.ctx.fillStyle = chColor;
+            this.ctx.beginPath();
+            this.drawRoundRect(this.ctx, paneX + 12, currentY, 4, blockHeight, 2);
+            this.ctx.fill();
+            
+            this.ctx.fillStyle = chColor;
+            this.ctx.font = 'bold 12px "Inter", "Roboto", "Outfit", sans-serif';
+            this.ctx.fillText(ch, paneX + 26, currentY + 12);
+            
+            const acc = this.metricsAccumulator[ch];
+            const hasData = acc && acc.count > 0 && acc.min !== null && acc.min !== Infinity;
+            
+            const isFFT = this.getChannelFFTEnabled(ch);
+            const strMin = hasData ? this.formatVoltage(acc.min, isFFT) : '--';
+            const strMax = hasData ? this.formatVoltage(acc.max, isFFT) : '--';
+            const strMean = hasData ? this.formatVoltage(acc.mean, isFFT) : '--';
+            const strPkPk = hasData ? this.formatVoltage(Math.abs(acc.max - acc.min), isFFT) : '--';
+            
+            const items = [
+                { label: 'Min', val: strMin },
+                { label: 'Max', val: strMax },
+                { label: 'Mean', val: strMean },
+                { label: 'Pk-Pk', val: strPkPk }
+            ];
+            
+            const colW = (paneWidth - 44) / 2;
+            
+            items.forEach((item, itemIdx) => {
+                const row = Math.floor(itemIdx / 2);
+                const col = itemIdx % 2;
+                
+                const itemX = paneX + 26 + col * colW;
+                const itemY = currentY + 36 + row * 38;
+                
+                this.ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+                this.ctx.font = '10px "Inter", "Roboto", "Outfit", sans-serif';
+                this.ctx.fillText(item.label, itemX, itemY);
+                
+                this.ctx.fillStyle = hasData ? '#ffffff' : 'rgba(255, 255, 255, 0.25)';
+                this.ctx.font = 'bold 11px "Courier New", monospace';
+                this.ctx.fillText(item.val, itemX, itemY + 14);
+            });
+            
+            currentY += blockHeight + 12;
+        });
+    }
+
+    drawRoundRect(ctx, x, y, w, h, r) {
+        if (ctx.roundRect) {
+            ctx.roundRect(x, y, w, h, r);
+        } else {
+            if (w < 2 * r) r = w / 2;
+            if (h < 2 * r) r = h / 2;
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.arcTo(x + w, y, x + w, y + h, r);
+            ctx.arcTo(x + w, y + h, x, y + h, r);
+            ctx.arcTo(x, y + h, x, y, r);
+            ctx.arcTo(x, y, x + w, y, r);
+            ctx.closePath();
+        }
     }
 }
 

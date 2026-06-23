@@ -396,6 +396,49 @@
                     </div>
                 </div>
 
+                <div class="section-title">METRICS (MEASUREMENTS)</div>
+                <div class="calibration-section">
+                    <div class="knob-control checkbox-group" style="display: flex; flex-direction: column; gap: 8px;">
+                        <label class="checkbox-label" style="color: #00ff66; display: flex; align-items: center; gap: 8px;">
+                            <input type="checkbox" id="metrics-ch1-enable"> CH1 Metrics
+                        </label>
+                        <label class="checkbox-label" style="color: #00e5ff; display: flex; align-items: center; gap: 8px;">
+                            <input type="checkbox" id="metrics-ch2-enable"> CH2 Metrics
+                        </label>
+                        <label class="checkbox-label" style="color: #bd00ff; display: flex; align-items: center; gap: 8px; margin-bottom: 0;">
+                            <input type="checkbox" id="metrics-math-enable"> MATH Metrics
+                        </label>
+                    </div>
+
+                    <div class="knob-control" style="margin-top: 15px;">
+                        <label>Metrics Position</label>
+                        <select id="metrics-layout-selector" style="width: 100%;">
+                            <option value="bottom_overlay" selected>Bottom Overlay</option>
+                            <option value="right_split">Right Split</option>
+                        </select>
+                    </div>
+
+                    <div class="knob-control checkbox-control" style="margin-top: 15px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
+                        <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px;">
+                            <input type="checkbox" id="metrics-autoreset-enable"> Enable Auto Reset
+                        </label>
+                    </div>
+
+                    <div class="knob-control" id="metrics-autoreset-slider-group" style="display: none;">
+                        <label>Auto Reset Period</label>
+                        <input type="range" id="metrics-autoreset-slider" class="slider" min="0" max="5" step="1" value="0">
+                        <div class="scroll-vals">
+                            <span>1 Viewport</span>
+                            <span id="metrics-autoreset-val" style="color: #00ff66; font-family: monospace;">1 Viewport</span>
+                            <span>32 Viewports</span>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 15px; display: flex; justify-content: center;">
+                        <button id="metrics-reset-btn" class="btn btn-red" style="width: 100%; padding: 6px 12px; font-size: 11px;">Reset Metrics</button>
+                    </div>
+                </div>
+
                 <div class="section-title">STATUS INFO</div>
                 <div class="status-panel">
                     <div>Status: <span id="status-text" class="status-ok">Idle</span></div>
