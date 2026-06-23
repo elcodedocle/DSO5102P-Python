@@ -41,9 +41,10 @@ Implemented and tested functions:
 
 ## Web oscilloscope
 
-Uses FastAPI and websockets to stream chunks of ReadSampleData to a nice web GUI with some processing (Triggers, FFT,
-(split) display and playback controls, cursors, and a MATH virtual channel). No fancy webgl shaders/rasterization
-rendering; Just a regular HTML canvas.
+Uses FastAPI and websockets to stream chunks of ReadSampleData to a nice web GUI
+with some processing (Triggers, FFT, (split) display and playback controls,
+cursors, and a MATH virtual channel). No fancy webgl shaders/rasterization
+rendering or persistence; Just a regular HTML canvas.
 
 ```bash
 pip install -r requirements.txt # (or equivalent for your venv)
@@ -54,19 +55,25 @@ open http://localhost:8000 # (or equivalent for your os)
 
 ![web_oscilloscope.png](support/img/web_oscilloscope.png)
 
-Because it tries to read and process into CSV records and stream to the client at (up to) 1GSa/s per channel, this tool
-is pretty resource intensive before even displaying or storing anything. Then the client has to parse that stuff and
-display and store it. Several optimizations are applied through this whole pipeline, but don't count on it working too
-well on a thin client over a choppy WiFi. Best used on a capable laptop running both the server and localhost client.
-Or just capture first, then replay it offline in playback mode in a capable machine.
+Because it tries to read and process into CSV records and stream to the client
+at (up to) 1GSa/s per channel, this tool is pretty resource intensive before
+even displaying or storing anything. Then the client has to parse that stuff and
+display and store it. Several optimizations are applied through each step, but
+don't count on it working too well on a thin client over a choppy WiFi. Best
+used on a capable laptop running both the localhost server and client. Or just
+capture first, then replay it offline in playback mode in a capable machine.
 
-The device's USB 2 interface maxes out aat 480Mbit/s, so sustained 1GSa/s streaming is not possible anyway. Relatively
-big gaps and jitter inducing non-RT syscall delays between batches also limit the usability envelope of this tool. To
-mitigate this the tool operates over each sample batch individually as a separate capture when necessary. In any case
-the measurement of signals in the tens of MHz already degrades pretty heavily due to the relatively high capacitance of
-the bundled passive probes at those frequencies: Label claims up to 100MHz; I wouldn't go beyond 10 for reasonable
-accuracy, as evidenced by the 2 screenshots below capturing an Amiga 500 30Mhz oscillator signal (Yeah, that is supposed
-to be square).
+The device's USB 2 interface maxes out at 480Mbit/s, so sustained 1GSa/s
+streaming is not possible anyway. Relatively big gaps and jitter inducing non-RT
+syscall delays between batches also limit the usability envelope. To mitigate
+this the tool operates over each sample batch individually as a separate capture
+when necessary. In any case the measurement of signals in the tens of MHz
+already degrades pretty heavily before sampling due to the relatively high
+capacitance of the bundled passive probes at those frequencies: Label claims up
+to 100MHz; I wouldn't go beyond 10 for reasonable accuracy, as evidenced by the
+2 screenshots below capturing an Amiga 500 30Mhz can oscillator package signal
+in the 10x attenuation higher impedance mode (Yeah, that is actually probing a
+nice 30MHz square clock signal).
 
 ![screenshot_during_web_oscilloscope.png](support/img/screenshot_during_web_oscilloscope.png)
 

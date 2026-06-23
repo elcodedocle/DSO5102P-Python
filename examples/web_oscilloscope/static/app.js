@@ -29,6 +29,13 @@ class OscilloscopeApp {
         this.sourceText = document.getElementById('source-text');
         this.capturedCount = document.getElementById('captured-count');
         
+        // Configuration Profiles DOM elements
+        this.profileSelector = document.getElementById('profile-selector');
+        this.profileRecallBtn = document.getElementById('profile-recall-btn');
+        this.profileSaveBtn = document.getElementById('profile-save-btn');
+        this.profileSaveAsBtn = document.getElementById('profile-save-as-btn');
+        this.profileDeleteBtn = document.getElementById('profile-delete-btn');
+        
         // Channel Visibility and Layout Checkboxes
         this.ch1Enable = document.getElementById('ch1-enable');
         this.ch2Enable = document.getElementById('ch2-enable');
@@ -436,11 +443,39 @@ class OscilloscopeApp {
             });
         }
 
+        // Profile configurations listeners
+        if (this.profileRecallBtn) {
+            this.profileRecallBtn.addEventListener('click', () => {
+                this.recallProfile(this.profileSelector.value);
+            });
+        }
+        if (this.profileSaveBtn) {
+            this.profileSaveBtn.addEventListener('click', () => {
+                this.onProfileSavePressed();
+            });
+        }
+        if (this.profileSaveAsBtn) {
+            this.profileSaveAsBtn.addEventListener('click', () => {
+                this.onProfileSaveAsPressed();
+            });
+        }
+        if (this.profileDeleteBtn) {
+            this.profileDeleteBtn.addEventListener('click', () => {
+                this.onProfileDeletePressed();
+            });
+        }
+
         // Sync initial UI display
         if (this.metricsAutoresetEnable && this.metricsAutoresetSliderGroup) {
             this.metricsAutoresetSliderGroup.style.display = this.metricsAutoResetEnabled ? 'block' : 'none';
             this.updateMetricsSliderLabel();
         }
+
+        // Load profiles from localStorage
+        this.loadProfiles();
+
+        // Perform a complete reset of all controls/inputs to default values on page reload
+        this.resetAllControlsToDefaults();
 
         // Load default mock waveforms on startup
         this.loadDefaultMockWaveforms();
@@ -3929,6 +3964,377 @@ class OscilloscopeApp {
             ctx.arcTo(x, y + h, x, y, r);
             ctx.arcTo(x, y, x + w, y, r);
             ctx.closePath();
+        }
+    }
+
+    // --- CONFIGURATION PROFILES FEATURE ---
+
+    loadProfiles() {
+        try {
+            const stored = localStorage.getItem('hantek_dso_profiles');
+            if (stored) {
+                this.profiles = JSON.parse(stored);
+            } else {
+                this.profiles = {};
+            }
+        } catch (e) {
+            console.error("Failed to load profiles from localStorage", e);
+            this.profiles = {};
+        }
+        this.updateProfileSelectorOptions();
+    }
+
+    updateProfileSelectorOptions() {
+        if (!this.profileSelector) return;
+        
+        // Clear except placeholder
+        this.profileSelector.innerHTML = '<option value="">-- Select Profile --</option>';
+        
+        const sortedNames = Object.keys(this.profiles).sort();
+        sortedNames.forEach(name => {
+            const option = document.createElement('option');
+            option.value = name;
+            option.textContent = name;
+            this.profileSelector.appendChild(option);
+        });
+    }
+
+    resetAllControlsToDefaults() {
+        const defaultProfile = {
+            mode: 'playback',
+            activeTab: 'CH1',
+            ch1Enable: true,
+            ch2Enable: true,
+            mathEnable: false,
+            layoutMode: 'overlay',
+            gridIntensity: 25,
+            currentTimebaseIdx: 18,
+            horizontalPosition: 0.0,
+            playbackSpeed: 1.0,
+            playbackSpeedSliderValue: 40,
+            
+            currentVoltbaseIdxCh1: 10,
+            currentVoltbaseIdxCh2: 10,
+            currentVoltbaseIdxMath: 10,
+            verticalOffsetDivCh1: 0.0,
+            verticalOffsetDivCh2: 0.0,
+            verticalOffsetDivMath: 0.0,
+            mathOperation: 'CH1+CH2',
+            
+            fftEnabledCh1: false,
+            fftEnabledCh2: false,
+            fftEnabledMath: false,
+            fftWindow: 'Hanning',
+            fftVerticalBase: 'Vrms',
+            
+            osdEnabledCh1: true,
+            osdEnabledCh2: true,
+            osdEnabledMath: true,
+            
+            triggerEnabled: { 'CH1': false, 'CH2': false, 'MATH': false },
+            triggerActionVal: { 'CH1': 'pause', 'CH2': 'pause', 'MATH': 'pause' },
+            triggerLowDiv: { 'CH1': -1.0, 'CH2': -1.0, 'MATH': -1.0 },
+            triggerHighDiv: { 'CH1': 1.0, 'CH2': 1.0, 'MATH': 1.0 },
+            triggerMinSamples: { 'CH1': 1, 'CH2': 1, 'MATH': 1 },
+            triggerMinTimeSec: { 'CH1': 0.0, 'CH2': 0.0, 'MATH': 0.0 },
+            triggerPostDelayVal: { 'CH1': 1600, 'CH2': 1600, 'MATH': 1600 },
+            triggerPostAuto: { 'CH1': true, 'CH2': true, 'MATH': true },
+            triggerFreqLowHz: { 'CH1': 100.0, 'CH2': 150.0, 'MATH': 120.0 },
+            triggerFreqHighHz: { 'CH1': 1000.0, 'CH2': 1500.0, 'MATH': 1200.0 },
+            triggerFFTMatchLogic: { 'CH1': 'any', 'CH2': 'any', 'MATH': 'any' },
+            
+            cursorsEnabled: false,
+            cursorChEnabled: { 'CH1': true, 'CH2': true, 'MATH': true },
+            cursorTrackingMode: { 'CH1': 'free', 'CH2': 'free', 'MATH': 'free' },
+            cursor1: null,
+            cursor2: null,
+            
+            metricsEnabledCh1: false,
+            metricsEnabledCh2: false,
+            metricsEnabledMath: false,
+            metricsLayout: 'bottom_overlay',
+            metricsAutoResetEnabled: false,
+            metricsAutoResetMult: 1
+        };
+        
+        this.applyProfile(defaultProfile);
+        
+        // Reset selected index of the dropdown as well
+        if (this.profileSelector) {
+            this.profileSelector.value = "";
+        }
+    }
+
+    applyProfile(p) {
+        // Core states
+        this.mode = p.mode;
+        this.activeTab = p.activeTab || 'CH1';
+        this.layoutMode = p.layoutMode;
+        this.gridIntensity = p.gridIntensity;
+        this.currentTimebaseIdx = p.currentTimebaseIdx;
+        this.horizontalPosition = p.horizontalPosition;
+        
+        // Enable checkboxes
+        this.ch1Enable.checked = p.ch1Enable;
+        this.ch2Enable.checked = p.ch2Enable;
+        this.mathEnable.checked = p.mathEnable;
+        this.layoutSelector.value = p.layoutMode;
+        this.modeSelector.value = p.mode;
+        
+        // Vertical states
+        this.currentVoltbaseIdxCh1 = p.currentVoltbaseIdxCh1;
+        this.currentVoltbaseIdxCh2 = p.currentVoltbaseIdxCh2;
+        this.currentVoltbaseIdxMath = p.currentVoltbaseIdxMath;
+        this.verticalOffsetDivCh1 = p.verticalOffsetDivCh1;
+        this.verticalOffsetDivCh2 = p.verticalOffsetDivCh2;
+        this.verticalOffsetDivMath = p.verticalOffsetDivMath;
+        this.mathOperation = p.mathOperation || 'CH1+CH2';
+        if (this.mathOpSelector) {
+            this.mathOpSelector.value = this.mathOperation;
+        }
+        
+        // FFT states
+        this.fftEnabledCh1 = p.fftEnabledCh1;
+        this.fftEnabledCh2 = p.fftEnabledCh2;
+        this.fftEnabledMath = p.fftEnabledMath;
+        this.fftWindow = p.fftWindow || 'Hanning';
+        this.fftVerticalBase = p.fftVerticalBase || 'Vrms';
+        if (this.fftWindowSelect) this.fftWindowSelect.value = this.fftWindow;
+        if (this.fftBaseSelect) this.fftBaseSelect.value = this.fftVerticalBase;
+        
+        // OSD states
+        this.osdEnabledCh1 = p.osdEnabledCh1 !== undefined ? p.osdEnabledCh1 : true;
+        this.osdEnabledCh2 = p.osdEnabledCh2 !== undefined ? p.osdEnabledCh2 : true;
+        this.osdEnabledMath = p.osdEnabledMath !== undefined ? p.osdEnabledMath : true;
+        
+        // Trigger states
+        this.triggerEnabled = JSON.parse(JSON.stringify(p.triggerEnabled));
+        this.triggerActionVal = JSON.parse(JSON.stringify(p.triggerActionVal));
+        this.triggerLowDiv = JSON.parse(JSON.stringify(p.triggerLowDiv));
+        this.triggerHighDiv = JSON.parse(JSON.stringify(p.triggerHighDiv));
+        this.triggerMinSamples = JSON.parse(JSON.stringify(p.triggerMinSamples));
+        this.triggerMinTimeSec = JSON.parse(JSON.stringify(p.triggerMinTimeSec));
+        this.triggerPostDelayVal = JSON.parse(JSON.stringify(p.triggerPostDelayVal));
+        this.triggerPostAuto = JSON.parse(JSON.stringify(p.triggerPostAuto));
+        this.triggerFreqLowHz = JSON.parse(JSON.stringify(p.triggerFreqLowHz));
+        this.triggerFreqHighHz = JSON.parse(JSON.stringify(p.triggerFreqHighHz));
+        this.triggerFFTMatchLogic = JSON.parse(JSON.stringify(p.triggerFFTMatchLogic));
+        
+        // Cursors states
+        this.cursorsEnabled = p.cursorsEnabled;
+        this.cursorChEnabled = JSON.parse(JSON.stringify(p.cursorChEnabled));
+        this.cursorTrackingMode = JSON.parse(JSON.stringify(p.cursorTrackingMode));
+        
+        this.cursorsEnableCheckbox.checked = p.cursorsEnabled;
+        this.cursorCh1Enable.checked = this.cursorChEnabled['CH1'];
+        this.cursorCh2Enable.checked = this.cursorChEnabled['CH2'];
+        this.cursorMathEnable.checked = this.cursorChEnabled['MATH'];
+        this.cursorCh1Track.value = this.cursorTrackingMode['CH1'];
+        this.cursorCh2Track.value = this.cursorTrackingMode['CH2'];
+        this.cursorMathTrack.value = this.cursorTrackingMode['MATH'];
+        
+        // Restore exact cursor data if available
+        if (p.cursor1) {
+            this.cursor1 = JSON.parse(JSON.stringify(p.cursor1));
+            this.recalculateCursorCoords(this.cursor1);
+        } else {
+            this.cursor1 = null;
+        }
+        
+        if (p.cursor2) {
+            this.cursor2 = JSON.parse(JSON.stringify(p.cursor2));
+            this.recalculateCursorCoords(this.cursor2);
+        } else {
+            this.cursor2 = null;
+        }
+        
+        this.updateCursorCSS();
+        this.updateCursorUIVisibility();
+        this.syncCursorSliders();
+        
+        // Metrics states
+        this.metricsEnabledCh1 = p.metricsEnabledCh1;
+        this.metricsEnabledCh2 = p.metricsEnabledCh2;
+        this.metricsEnabledMath = p.metricsEnabledMath;
+        this.metricsLayout = p.metricsLayout || 'bottom_overlay';
+        this.metricsAutoResetEnabled = p.metricsAutoResetEnabled;
+        this.metricsAutoResetMult = p.metricsAutoResetMult || 1;
+        
+        if (this.metricsCh1Enable) this.metricsCh1Enable.checked = p.metricsEnabledCh1;
+        if (this.metricsCh2Enable) this.metricsCh2Enable.checked = p.metricsEnabledCh2;
+        if (this.metricsMathEnable) this.metricsMathEnable.checked = p.metricsEnabledMath;
+        if (this.metricsLayoutSelector) this.metricsLayoutSelector.value = this.metricsLayout;
+        if (this.metricsAutoresetEnable) {
+            this.metricsAutoresetEnable.checked = p.metricsAutoResetEnabled;
+            if (this.metricsAutoresetSliderGroup) {
+                this.metricsAutoresetSliderGroup.style.display = p.metricsAutoResetEnabled ? 'block' : 'none';
+            }
+        }
+        if (this.metricsAutoresetSlider) {
+            const mults = [1, 2, 4, 8, 16, 32];
+            const idx = mults.indexOf(this.metricsAutoResetMult);
+            this.metricsAutoresetSlider.value = idx >= 0 ? idx : 0;
+        }
+        
+        // Playback speed
+        if (this.playbackSpeedSlider) {
+            this.playbackSpeedSlider.value = p.playbackSpeedSliderValue || 40;
+            this.onPlaybackSpeedChange(this.playbackSpeedSlider.value);
+        }
+        
+        // Switch tab elements
+        this.switchActiveTab(this.activeTab);
+        
+        // Ensure UI panels are shown/hidden for mode changes
+        this.onModeChange();
+        
+        // Update sliders and readouts, and draw
+        this.updateSlidersAndReadouts();
+        this.drawOscilloscope();
+    }
+
+    saveProfile(name) {
+        if (!name || name.trim() === '') {
+            alert("Please enter a valid profile name.");
+            return;
+        }
+        
+        const profilePayload = {
+            mode: this.mode,
+            activeTab: this.activeTab,
+            ch1Enable: this.ch1Enable.checked,
+            ch2Enable: this.ch2Enable.checked,
+            mathEnable: this.mathEnable.checked,
+            layoutMode: this.layoutMode,
+            gridIntensity: this.gridIntensity,
+            currentTimebaseIdx: this.currentTimebaseIdx,
+            horizontalPosition: this.horizontalPosition,
+            playbackSpeed: this.playbackSpeed,
+            playbackSpeedSliderValue: parseInt(this.playbackSpeedSlider.value, 10),
+            
+            currentVoltbaseIdxCh1: this.currentVoltbaseIdxCh1,
+            currentVoltbaseIdxCh2: this.currentVoltbaseIdxCh2,
+            currentVoltbaseIdxMath: this.currentVoltbaseIdxMath,
+            verticalOffsetDivCh1: this.verticalOffsetDivCh1,
+            verticalOffsetDivCh2: this.verticalOffsetDivCh2,
+            verticalOffsetDivMath: this.verticalOffsetDivMath,
+            mathOperation: this.mathOperation,
+            
+            fftEnabledCh1: this.fftEnabledCh1,
+            fftEnabledCh2: this.fftEnabledCh2,
+            fftEnabledMath: this.fftEnabledMath,
+            fftWindow: this.fftWindow,
+            fftVerticalBase: this.fftVerticalBase,
+            
+            osdEnabledCh1: this.osdEnabledCh1,
+            osdEnabledCh2: this.osdEnabledCh2,
+            osdEnabledMath: this.osdEnabledMath,
+            
+            triggerEnabled: this.triggerEnabled,
+            triggerActionVal: this.triggerActionVal,
+            triggerLowDiv: this.triggerLowDiv,
+            triggerHighDiv: this.triggerHighDiv,
+            triggerMinSamples: this.triggerMinSamples,
+            triggerMinTimeSec: this.triggerMinTimeSec,
+            triggerPostDelayVal: this.triggerPostDelayVal,
+            triggerPostAuto: this.triggerPostAuto,
+            triggerFreqLowHz: this.triggerFreqLowHz,
+            triggerFreqHighHz: this.triggerFreqHighHz,
+            triggerFFTMatchLogic: this.triggerFFTMatchLogic,
+            
+            cursorsEnabled: this.cursorsEnabled,
+            cursorChEnabled: this.cursorChEnabled,
+            cursorTrackingMode: this.cursorTrackingMode,
+            cursor1: this.cursor1 ? {
+                time: this.cursor1.time,
+                freq: this.cursor1.freq,
+                posValue: this.cursor1.posValue,
+                activeCh: this.cursor1.activeCh
+            } : null,
+            cursor2: this.cursor2 ? {
+                time: this.cursor2.time,
+                freq: this.cursor2.freq,
+                posValue: this.cursor2.posValue,
+                activeCh: this.cursor2.activeCh
+            } : null,
+            
+            metricsEnabledCh1: this.metricsEnabledCh1,
+            metricsEnabledCh2: this.metricsEnabledCh2,
+            metricsEnabledMath: this.metricsEnabledMath,
+            metricsLayout: this.metricsLayout,
+            metricsAutoResetEnabled: this.metricsAutoResetEnabled,
+            metricsAutoResetMult: this.metricsAutoResetMult
+        };
+        
+        this.profiles[name] = profilePayload;
+        
+        try {
+            localStorage.setItem('hantek_dso_profiles', JSON.stringify(this.profiles));
+            this.updateProfileSelectorOptions();
+            this.profileSelector.value = name;
+            this.statusText.textContent = `Saved: "${name}"`;
+            this.statusText.className = "status-ok";
+        } catch (e) {
+            console.error("Failed to save profile to localStorage", e);
+            alert("Failed to save profile. localStorage limit might be exceeded.");
+        }
+    }
+
+    recallProfile(name) {
+        if (!name) {
+            alert("Please select a profile to recall.");
+            return;
+        }
+        const profile = this.profiles[name];
+        if (!profile) {
+            alert(`Profile "${name}" not found.`);
+            return;
+        }
+        this.stopAllActivities();
+        this.applyProfile(profile);
+        this.statusText.textContent = `Recalled: "${name}"`;
+        this.statusText.className = "status-ok";
+    }
+
+    onProfileSavePressed() {
+        const selectedName = this.profileSelector.value;
+        if (selectedName) {
+            if (confirm(`Overwrite existing profile "${selectedName}"?`)) {
+                this.saveProfile(selectedName);
+            }
+        } else {
+            this.onProfileSaveAsPressed();
+        }
+    }
+
+    onProfileSaveAsPressed() {
+        const name = prompt("Enter a name for the new profile:");
+        if (name) {
+            const trimmedName = name.trim();
+            if (trimmedName) {
+                this.saveProfile(trimmedName);
+            }
+        }
+    }
+
+    onProfileDeletePressed() {
+        const selectedName = this.profileSelector.value;
+        if (!selectedName) {
+            alert("Please select a profile to delete.");
+            return;
+        }
+        if (confirm(`Are you sure you want to delete profile "${selectedName}"?`)) {
+            delete this.profiles[selectedName];
+            try {
+                localStorage.setItem('hantek_dso_profiles', JSON.stringify(this.profiles));
+                this.updateProfileSelectorOptions();
+                this.resetAllControlsToDefaults();
+                this.statusText.textContent = `Deleted: "${selectedName}"`;
+                this.statusText.className = "status-ok";
+            } catch (e) {
+                console.error("Failed to delete profile from localStorage", e);
+                alert("Failed to delete profile.");
+            }
         }
     }
 }

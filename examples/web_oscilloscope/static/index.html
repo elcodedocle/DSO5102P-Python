@@ -448,6 +448,23 @@
                     </div>
                 </div>
 
+
+                <div class="section-title">CONFIGURATION PROFILES</div>
+                <div class="calibration-section">
+                    <div class="knob-control" style="margin-bottom: 8px;">
+                        <label>Select Profile</label>
+                        <select id="profile-selector" style="width: 100%; margin-bottom: 10px;">
+                            <option value="">-- Select Profile --</option>
+                        </select>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                        <button id="profile-recall-btn" class="btn btn-blue" style="padding: 6px; font-size: 11px;">Recall</button>
+                        <button id="profile-save-btn" class="btn btn-green" style="padding: 6px; font-size: 11px;">Save</button>
+                        <button id="profile-save-as-btn" class="btn btn-blue" style="padding: 6px; font-size: 11px;">Save As...</button>
+                        <button id="profile-delete-btn" class="btn btn-red" style="padding: 6px; font-size: 11px;">Delete</button>
+                    </div>
+                </div>
+
                 <div class="section-title">STATUS INFO</div>
                 <div class="status-panel">
                     <div>Status: <span id="status-text" class="status-ok">Idle</span></div>
