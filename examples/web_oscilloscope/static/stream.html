@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hantek DSO5102P Live Screenshot Stream</title>
+    <link rel="stylesheet" href="/static/style.css?v=6">
+    <style>
+        body {
+            font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+            background-color: #0c0c0e;
+            color: #e2e2e6;
+            height: 100vh;
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+        }
+
+        .stream-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        /* Stream Header */
+        .stream-header {
+            background-color: #15151a;
+            border-bottom: 2px solid #23232e;
+            padding: 10px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 60px;
+            flex-shrink: 0;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        .logo {
+            font-size: 20px;
+            font-weight: 700;
+            color: #ffffff;
+            letter-spacing: 0.5px;
+        }
+
+        .logo-text {
+            color: #00ff66;
+            text-transform: uppercase;
+            text-shadow: 0 0 10px rgba(0, 255, 102, 0.4);
+        }
+
+        .back-link-btn {
+            background: linear-gradient(135deg, #1f1f2e 0%, #2a2a3d 100%);
+            border: 1px solid #3c3c4f;
+            color: #ffffff;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+
+        .back-link-btn:hover {
+            border-color: #00ff66;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 255, 102, 0.15);
+        }
+
+        /* Main Workspace layout */
+        .stream-main {
+            display: flex;
+            flex-grow: 1;
+            overflow: hidden;
+            height: calc(100vh - 60px);
+        }
+
+        /* Stream Display Screen */
+        .viewport-area {
+            flex-grow: 1;
+            background-color: #060608;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 30px;
+            position: relative;
+            border-right: 2px solid #23232e;
+        }
+
+        .display-frame {
+            max-width: 100%;
+            max-height: 100%;
+            background-color: #020204;
+            border-radius: 12px;
+            border: 3px solid #2c2c38;
+            box-shadow: 0 0 35px rgba(0, 255, 102, 0.08), inset 0 0 20px rgba(0, 0, 0, 0.8);
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: border-color 0.3s;
+        }
+
+        .display-frame.active {
+            border-color: #00ff66;
+            box-shadow: 0 0 40px rgba(0, 255, 102, 0.15), inset 0 0 20px rgba(0,0,0,0.8);
+        }
+
+        .display-frame.paused {
+            border-color: #cc2424;
+            box-shadow: 0 0 40px rgba(204, 36, 36, 0.12), inset 0 0 20px rgba(0,0,0,0.8);
+        }
+
+        #stream-img {
+            display: block;
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+
+        /* Placeholder state for Paused */
+        .stream-placeholder {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(5, 5, 8, 0.95);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 12px;
+            color: #888896;
+            font-size: 16px;
+            font-weight: 500;
+        }
+
+        .stream-placeholder.hide {
+            display: none !important;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #1f1f2e;
+            border-top: 4px solid #00ff66;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Sidebar Panel */
+        .control-sidebar {
+            width: 320px;
+            background-color: #111116;
+            flex-shrink: 0;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            overflow-y: auto;
+            box-shadow: -4px 0 25px rgba(0, 0, 0, 0.3);
+        }
+
+        .section-title {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            color: #6c6c7e;
+            border-bottom: 1px solid #23232e;
+            padding-bottom: 8px;
+            text-transform: uppercase;
+        }
+
+        .stats-panel {
+            background-color: #17171f;
+            border: 1px solid #23232e;
+            border-radius: 8px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+        }
+
+        .stat-label {
+            color: #8c8c9e;
+            font-weight: 500;
+        }
+
+        .stat-value {
+            font-family: monospace;
+            font-weight: 600;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: 700;
+            text-transform: uppercase;
+            font-size: 11px;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .status-active {
+            background-color: rgba(0, 255, 102, 0.1);
+            color: #00ff66;
+            border: 1px solid rgba(0, 255, 102, 0.2);
+        }
+
+        .status-paused {
+            background-color: rgba(204, 36, 36, 0.1);
+            color: #cc2424;
+            border: 1px solid rgba(204, 36, 36, 0.2);
+        }
+
+        .badge-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status-active .badge-dot {
+            background-color: #00ff66;
+            box-shadow: 0 0 8px #00ff66;
+            animation: pulse 1.8s infinite;
+        }
+
+        .status-paused .badge-dot {
+            background-color: #cc2424;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 255, 102, 0.5); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(0, 255, 102, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 255, 102, 0); }
+        }
+
+        /* Controls styling */
+        .knob-control {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .knob-control label {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: #8c8c9e;
+        }
+
+        .slider-container {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .slider-readout {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #8c8c9e;
+            font-family: monospace;
+        }
+
+        .action-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        /* Standard Buttons */
+        .btn-action {
+            width: 100%;
+            padding: 12px;
+            border-radius: 6px;
+            border: none;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: all 0.2s ease;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        .btn-action:active {
+            transform: scale(0.98);
+        }
+
+        .btn-action-green {
+            background: linear-gradient(135deg, #00b34a 0%, #008f35 100%);
+            color: #ffffff;
+        }
+
+        .btn-action-green:hover {
+            background: linear-gradient(135deg, #00cc55 0%, #00a33e 100%);
+            box-shadow: 0 4px 12px rgba(0, 255, 102, 0.2);
+        }
+
+        .btn-action-blue {
+            background: linear-gradient(135deg, #2475cc 0%, #1a5ca6 100%);
+            color: #ffffff;
+        }
+
+        .btn-action-blue:hover {
+            background: linear-gradient(135deg, #308ce5 0%, #206ebc 100%);
+            box-shadow: 0 4px 12px rgba(36, 117, 204, 0.2);
+        }
+
+        .btn-action-red {
+            background: linear-gradient(135deg, #cc2424 0%, #a61a1a 100%);
+            color: #ffffff;
+        }
+
+        .btn-action-red:hover {
+            background: linear-gradient(135deg, #e53030 0%, #bc2020 100%);
+            box-shadow: 0 4px 12px rgba(204, 36, 36, 0.2);
+        }
+
+        .btn-action-gray {
+            background: linear-gradient(135deg, #2a2a35 0%, #1f1f28 100%);
+            color: #e2e2e6;
+            border: 1px solid #3c3c4f;
+        }
+
+        .btn-action-gray:hover {
+            background: linear-gradient(135deg, #353545 0%, #252530 100%);
+            border-color: #5a5a70;
+        }
+
+        .btn-action:disabled {
+            opacity: 0.5 !important;
+            cursor: not-allowed !important;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
+        /* Help block */
+        .help-box {
+            background-color: #14141c;
+            border-left: 3px solid #00ff66;
+            padding: 12px;
+            border-radius: 4px;
+            font-size: 11px;
+            color: #8c8c9e;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="stream-container">
+        <!-- Header -->
+        <header class="stream-header">
+            <div class="logo">
+                <span class="logo-text">Hantek</span> DSO Screenshot Stream
+            </div>
+            <a href="/" class="back-link-btn" id="back-dashboard-btn">
+                <span>◀</span> Back to Dashboard
+            </a>
+        </header>
+
+        <!-- Main Body -->
+        <main class="stream-main">
+            <!-- Central Screen Area -->
+            <div class="viewport-area">
+                <div class="display-frame active" id="display-frame">
+                    <!-- Standard video stream element -->
+                    <img id="stream-img" src="/api/screenshot-stream/live?quality=80" alt="Oscilloscope Screen Video Stream">
+                    
+                    <!-- Paused Overlay/Spinner -->
+                    <div id="stream-placeholder" class="stream-placeholder hide">
+                        <div class="spinner" id="placeholder-spinner"></div>
+                        <span id="placeholder-text">Stream Paused</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Controls Sidebar -->
+            <aside class="control-sidebar">
+                <div class="section-title">Connection Status</div>
+                <div class="stats-panel">
+                    <div class="stat-row">
+                        <span class="stat-label">Feed Status:</span>
+                        <span id="status-badge" class="status-badge status-active">
+                            <span class="badge-dot"></span>Active
+                        </span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Resolution:</span>
+                        <span class="stat-value">800 × 480</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Encoding Format:</span>
+                        <span class="stat-value">Motion JPEG</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Active Session:</span>
+                        <span id="session-time" class="stat-value">0s</span>
+                    </div>
+                </div>
+
+                <div class="section-title">Stream Configuration</div>
+                <div class="knob-control">
+                    <label>JPEG Compression Quality</label>
+                    <div class="slider-container">
+                        <input type="range" id="compression-quality" class="slider" min="50" max="100" value="80">
+                        <div class="slider-readout">
+                            <span>High Speed (50%)</span>
+                            <span id="quality-val" style="color: #00ff66; font-weight: 700;">80%</span>
+                            <span>High Res (100%)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section-title">Interactive Commands</div>
+                <div class="action-buttons">
+                    <button id="toggle-stream-btn" class="btn-action btn-action-red">
+                        ⏸ Pause Stream
+                    </button>
+                    <button id="refresh-stream-btn" class="btn-action btn-action-gray">
+                        🔄 Refresh Connection
+                    </button>
+                    <button id="screenshot-png-btn" class="btn-action btn-action-blue">
+                        📸 Save PNG Screenshot
+                    </button>
+                </div>
+            </aside>
+        </main>
+    </div>
+
+    <!-- Client-side logic -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const streamImg = document.getElementById('stream-img');
+            const toggleBtn = document.getElementById('toggle-stream-btn');
+            const refreshBtn = document.getElementById('refresh-stream-btn');
+            const screenshotBtn = document.getElementById('screenshot-png-btn');
+            const qualitySlider = document.getElementById('compression-quality');
+            const qualityValueText = document.getElementById('quality-val');
+            const statusBadge = document.getElementById('status-badge');
+            const displayFrame = document.getElementById('display-frame');
+            const streamPlaceholder = document.getElementById('stream-placeholder');
+            const placeholderSpinner = document.getElementById('placeholder-spinner');
+            const placeholderText = document.getElementById('placeholder-text');
+            const sessionTimeText = document.getElementById('session-time');
+
+            let isStreamingActive = true;
+            let currentQuality = 80;
+            let sessionSeconds = 0;
+
+            // Simple session liveness ticker
+            const sessionTimer = setInterval(() => {
+                if (isStreamingActive) {
+                    sessionSeconds++;
+                    sessionTimeText.textContent = sessionSeconds + "s";
+                }
+            }, 1000);
+
+            // Re-bind source
+            function updateStreamSource() {
+                if (isStreamingActive) {
+                    streamImg.src = `/api/screenshot-stream/live?quality=${currentQuality}&t=${Date.now()}`;
+                    displayFrame.className = "display-frame active";
+                    statusBadge.className = "status-badge status-active";
+                    statusBadge.innerHTML = '<span class="badge-dot"></span>Active';
+                    streamPlaceholder.classList.add('hide');
+                    toggleBtn.className = "btn-action btn-action-red";
+                    toggleBtn.textContent = "⏸ Pause Stream";
+                } else {
+                    // Stop stream loading by pointing image to a 1x1 blank pixel
+                    streamImg.src = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
+                    displayFrame.className = "display-frame paused";
+                    statusBadge.className = "status-badge status-paused";
+                    statusBadge.innerHTML = '<span class="badge-dot"></span>Paused';
+                    streamPlaceholder.classList.remove('hide');
+                    placeholderSpinner.style.display = "none";
+                    placeholderText.textContent = "Stream Paused";
+                    toggleBtn.className = "btn-action btn-action-green";
+                    toggleBtn.textContent = "▶ Resume Stream";
+                }
+            }
+
+            // Quality changes
+            qualitySlider.addEventListener('input', (e) => {
+                currentQuality = parseInt(e.target.value);
+                qualityValueText.textContent = currentQuality + "%";
+            });
+
+            qualitySlider.addEventListener('change', () => {
+                if (isStreamingActive) {
+                    updateStreamSource();
+                }
+            });
+
+            // Toggle active streaming
+            toggleBtn.addEventListener('click', () => {
+                isStreamingActive = !isStreamingActive;
+                updateStreamSource();
+            });
+
+            // Force refresh stream
+            refreshBtn.addEventListener('click', () => {
+                const originalText = refreshBtn.textContent;
+                refreshBtn.disabled = true;
+                refreshBtn.textContent = "Reconnecting...";
+                
+                // Show loading spinner
+                streamPlaceholder.classList.remove('hide');
+                placeholderSpinner.style.display = "block";
+                placeholderText.textContent = "Connecting feeds...";
+
+                setTimeout(() => {
+                    isStreamingActive = true;
+                    updateStreamSource();
+                    refreshBtn.disabled = false;
+                    refreshBtn.textContent = originalText;
+                }, 400);
+            });
+
+            // Fetch and download single color PNG screenshot
+            screenshotBtn.addEventListener('click', async () => {
+                if (screenshotBtn.disabled) return;
+                screenshotBtn.disabled = true;
+                const originalText = screenshotBtn.textContent;
+                screenshotBtn.textContent = "Capturing PNG...";
+                
+                try {
+                    const res = await fetch('/api/screenshot');
+                    if (!res.ok) throw new Error("PNG Capture failed");
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `dso_screenshot_${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
+                    document.body.appendChild(a);
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    a.remove();
+                } catch (e) {
+                    alert("Capture Error: " + e.message);
+                } finally {
+                    screenshotBtn.disabled = false;
+                    screenshotBtn.textContent = originalText;
+                }
+            });
+        });
+    </script>
+</body>
+</html>

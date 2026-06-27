@@ -437,7 +437,7 @@ select:focus {
     -webkit-backdrop-filter: blur(4px) !important;
 }
 
-/* Custom Webkit Scrollbars for premium dashboard aesthetic */
+/* Custom Webkit Scrollbars for dashboard aesthetic */
 ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -476,7 +476,7 @@ select:focus {
     box-shadow: 0 0 12px rgba(189, 0, 255, 0.15), inset 0 0 6px rgba(189, 0, 255, 0.05);
 }
 
-/* Premium Glassmorphism Tooltip for Cursors */
+/* Glassmorphism Tooltip for Cursors */
 .cursor-tooltip {
     position: absolute;
     bottom: 25px;

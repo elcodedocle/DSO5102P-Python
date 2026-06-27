@@ -23,6 +23,8 @@ class OscilloscopeApp {
         this.freezeBtn = document.getElementById('freeze-btn');
         this.playBtn = document.getElementById('playback-play-btn');
         this.autocalBtn = document.getElementById('autocal-btn');
+        this.screenshotBtn = document.getElementById('screenshot-btn');
+        this.streamBtn = document.getElementById('stream-btn');
         
         // Status fields
         this.statusText = document.getElementById('status-text');
@@ -318,6 +320,8 @@ class OscilloscopeApp {
         this.freezeBtn.addEventListener('click', () => this.toggleFreezeDisplay());
         this.playBtn.addEventListener('click', () => this.togglePlaybackPlay());
         this.autocalBtn.addEventListener('click', () => this.autoCalibrate());
+        this.screenshotBtn.addEventListener('click', () => this.takeScreenshot());
+        this.streamBtn.addEventListener('click', () => this.navigateToStream());
         
         // Layout and visibility checkboxes
         this.ch1Enable.addEventListener('change', () => { 
@@ -563,15 +567,17 @@ class OscilloscopeApp {
         this.drawOscilloscope();
     }
     
-    onModeChange() {
+    async onModeChange() {
         this.mode = this.modeSelector.value;
-        this.stopAllActivities();
+        await this.stopAllActivities();
         
         if (this.mode === 'realtime') {
             this.fileSelectGroup.classList.add('hide');
             this.speedControlGroup.classList.add('hide');
             this.recordBtn.classList.remove('hide');
             this.freezeBtn.classList.remove('hide');
+            this.screenshotBtn.classList.remove('hide');
+            this.streamBtn.classList.remove('hide');
             this.playBtn.classList.add('hide');
             this.sourceText.textContent = "Live DSO Streams (CH1 & CH2)";
             
@@ -592,13 +598,15 @@ class OscilloscopeApp {
             this.speedControlGroup.classList.remove('hide');
             this.recordBtn.classList.add('hide');
             this.freezeBtn.classList.add('hide');
+            this.screenshotBtn.classList.add('hide');
+            this.streamBtn.classList.add('hide');
             this.playBtn.classList.remove('hide');
             this.loadDefaultMockWaveforms();
         }
         this.drawOscilloscope();
     }
     
-    stopAllActivities() {
+    async stopAllActivities() {
         this.playbackPlaying = false;
         if (this.playbackFrameId) {
             cancelAnimationFrame(this.playbackFrameId);
@@ -608,7 +616,7 @@ class OscilloscopeApp {
         this.playBtn.className = "btn btn-green";
         
         if (this.isLiveStreaming) {
-            this.stopLiveStreaming();
+            await this.stopLiveStreaming();
         }
         
         if (this.isRecording) {
@@ -766,20 +774,6 @@ class OscilloscopeApp {
         this.updateSlidersAndReadouts();
         this.drawOscilloscope();
     }
-    
-    findClosestIndex(val, array) {
-        let minDiff = Infinity;
-        let bestIdx = 0;
-        for (let i = 0; i < array.length; i++) {
-            const diff = Math.abs(val - array[i]);
-            if (diff < minDiff) {
-                minDiff = diff;
-                bestIdx = i;
-            }
-        }
-        return bestIdx;
-    }
-    
     syncTimebase(tbSeconds) {
         if (!tbSeconds || tbSeconds <= 0) return;
         const epsilon = 1e-11;
@@ -1019,7 +1013,11 @@ class OscilloscopeApp {
         if (this.streamSessionId !== undefined && this.streamSessionId !== null) {
             url += `?session_id=${this.streamSessionId}`;
         }
-        await fetch(url, { method: 'POST' });
+        try {
+            await fetch(url, { method: 'POST', keepalive: true });
+        } catch (e) {
+            console.warn("Failed to send stop streaming command:", e);
+        }
         this.streamSessionId = null;
         
         this.statusText.textContent = "Live feeds stopped";
@@ -4537,6 +4535,47 @@ class OscilloscopeApp {
                 alert("Failed to delete profile.");
             }
         }
+    }
+
+    async takeScreenshot() {
+        if (this.screenshotBtn.disabled) return;
+        this.screenshotBtn.disabled = true;
+        const originalText = this.screenshotBtn.textContent;
+        this.screenshotBtn.textContent = "Capturing...";
+        this.screenshotBtn.style.opacity = "0.7";
+        
+        try {
+            const response = await fetch('/api/screenshot');
+            if (!response.ok) {
+                throw new Error("Screenshot capture failed");
+            }
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `dso_screenshot_${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            a.remove();
+            
+            this.statusText.textContent = "Screenshot saved!";
+            this.statusText.className = "status-ok";
+        } catch (error) {
+            console.error(error);
+            this.statusText.textContent = "Capture Error";
+            this.statusText.className = "status-error";
+            alert("Error: " + error.message);
+        } finally {
+            this.screenshotBtn.disabled = false;
+            this.screenshotBtn.textContent = originalText;
+            this.screenshotBtn.style.opacity = "";
+        }
+    }
+
+    async navigateToStream() {
+        await this.stopAllActivities();
+        window.location.href = "/screenshot-stream";
     }
 }
 

@@ -1,4 +1,5 @@
 fastapi==0.136
 uvicorn[standard]==0.49
 websockets==16.0
+opencv-python==4.13.0.92
 #DSO5102P: numpy==2.4, pyusb==1.3
