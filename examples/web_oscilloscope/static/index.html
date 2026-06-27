@@ -224,6 +224,24 @@
                         </label>
                         <button id="fft-settings-btn" class="gear-btn" style="background: none; border: none; font-size: 16px; cursor: pointer; color: #888; padding: 4px; transition: color 0.2s;" title="FFT Configuration">⚙️</button>
                     </div>
+
+                    <!-- Display Persistency Controls -->
+                    <div class="knob-control" style="margin-top: 12px; border-top: 1px solid #2a2a2a; padding-top: 12px; margin-bottom: 8px;">
+                        <label>Display Persistency</label>
+                        <select id="persistence-mode" style="width: 100%;">
+                            <option value="AUTO">AUTO</option>
+                            <option value="MANUAL">MANUAL</option>
+                        </select>
+                    </div>
+                    <div class="knob-control" id="persistence-slider-group" style="margin-bottom: 0; display: none;">
+                        <label>Persistency Duration</label>
+                        <input type="range" id="persistence-time" class="slider" min="0" max="8" value="3">
+                        <div class="scroll-vals">
+                            <span>0s (Off)</span>
+                            <span id="persistence-time-val" style="color: #00ff66; font-family: monospace;">0.8s</span>
+                            <span>inf</span>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="section-title">TRIGGER CONTROLS</div>

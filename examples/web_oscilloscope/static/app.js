@@ -285,6 +285,19 @@ class OscilloscopeApp {
             MATH: -Infinity
         };
 
+        // Display Persistency DOM elements
+        this.persistenceModeSelector = document.getElementById('persistence-mode');
+        this.persistenceSliderGroup = document.getElementById('persistence-slider-group');
+        this.persistenceTimeSlider = document.getElementById('persistence-time');
+        this.persistenceTimeVal = document.getElementById('persistence-time-val');
+
+        // Display Persistency State Properties
+        this.persistenceMode = { 'CH1': 'AUTO', 'CH2': 'AUTO', 'MATH': 'AUTO' };
+        this.persistenceTime = { 'CH1': 0.8, 'CH2': 0.8, 'MATH': 0.8 };
+        this.persistenceTimeVals = [0.0, 0.2, 0.4, 0.8, 1.0, 2.0, 4.0, 8.0, Infinity];
+        this.persistenceHistory = { 'CH1': [], 'CH2': [], 'MATH': [] };
+        this.lastPersistenceCaptureTime = { 'CH1': 0, 'CH2': 0, 'MATH': 0 };
+
         this.init();
     }
     
@@ -345,6 +358,14 @@ class OscilloscopeApp {
         this.voltZoomOut.addEventListener('click', () => this.adjustVoltbase(1));
         this.voltZoomIn.addEventListener('click', () => this.adjustVoltbase(-1));
         this.voltOffset.addEventListener('input', (e) => this.onVoltOffset(e.target.value));
+        
+        // Display Persistency Controls
+        if (this.persistenceModeSelector) {
+            this.persistenceModeSelector.addEventListener('change', (e) => this.onPersistenceModeChange(e.target.value));
+        }
+        if (this.persistenceTimeSlider) {
+            this.persistenceTimeSlider.addEventListener('input', (e) => this.onPersistenceTimeChange(parseInt(e.target.value)));
+        }
         
         // OSD checkbox
         this.osdEnable.addEventListener('change', (e) => this.onOSDEnableChange(e.target.checked));
@@ -1589,6 +1610,9 @@ class OscilloscopeApp {
         const nextIdx = this.currentTimebaseIdx + direction;
         if (nextIdx >= 0 && nextIdx < this.HORIZ_VALS.length) {
             this.currentTimebaseIdx = nextIdx;
+            this.persistenceHistory['CH1'] = [];
+            this.persistenceHistory['CH2'] = [];
+            this.persistenceHistory['MATH'] = [];
             this.updateSlidersAndReadouts();
             this.drawOscilloscope();
         }
@@ -1605,6 +1629,7 @@ class OscilloscopeApp {
             const nextIdx = idx + direction;
             if (nextIdx >= 0 && nextIdx < this.DB_DIVS.length) {
                 this.setVoltbaseIdx(tab, nextIdx); // reuse scale index
+                this.persistenceHistory[tab] = [];
             }
         } else {
             // Adjust Voltbase zoom (V/div)
@@ -1612,6 +1637,7 @@ class OscilloscopeApp {
             const nextIdx = idx + direction;
             if (nextIdx >= 0 && nextIdx < this.VERT_VALS.length) {
                 this.setVoltbaseIdx(tab, nextIdx);
+                this.persistenceHistory[tab] = [];
             }
         }
         this.updateSlidersAndReadouts();
@@ -1877,14 +1903,44 @@ class OscilloscopeApp {
     onTimeScroll(value) {
         if (this.isCustomDragging) return;
         this.horizontalPosition = parseFloat(value) / 100;
+        this.persistenceHistory['CH1'] = [];
+        this.persistenceHistory['CH2'] = [];
+        this.persistenceHistory['MATH'] = [];
         this.updateSlidersAndReadouts();
         this.drawOscilloscope();
     }
     
     onVoltOffset(value) {
-        this.setVerticalOffset(this.activeTab, parseFloat(value) / 25);
+        const tab = this.activeTab;
+        this.setVerticalOffset(tab, parseFloat(value) / 25);
+        this.persistenceHistory[tab] = [];
         this.updateSlidersAndReadouts();
         this.drawOscilloscope();
+    }
+
+    onPersistenceModeChange(value) {
+        const tab = this.activeTab;
+        this.persistenceMode[tab] = value;
+        this.persistenceHistory[tab] = [];
+        this.updateSlidersAndReadouts();
+        this.drawOscilloscope();
+    }
+
+    onPersistenceTimeChange(index) {
+        const tab = this.activeTab;
+        this.persistenceTime[tab] = this.persistenceTimeVals[index];
+        this.updateSlidersAndReadouts();
+        this.drawOscilloscope();
+    }
+
+    getPersistenceDuration(chanName) {
+        if (this.persistenceMode[chanName] === 'MANUAL') {
+            return this.persistenceTime[chanName];
+        }
+        // AUTO mode dynamic calculation
+        const timebase = this.HORIZ_VALS[this.currentTimebaseIdx];
+        const screenDuration = timebase * 12;
+        return Math.max(1.0, Math.min(10.0, screenDuration * 2.5));
     }
     
     onTriggerEnableChange(enabled) {
@@ -2225,6 +2281,34 @@ class OscilloscopeApp {
             this.postTriggerVal.textContent = `${this.triggerPostDelayVal[tab]} pts`;
             this.postTriggerDelay.value = this.triggerPostDelayVal[tab];
             this.postTriggerAuto.checked = false;
+        }
+
+        // Sync Display Persistency UI controls
+        if (this.persistenceModeSelector) {
+            this.persistenceModeSelector.value = this.persistenceMode[tab] || 'AUTO';
+        }
+        if (this.persistenceSliderGroup) {
+            if (this.persistenceMode[tab] === 'MANUAL') {
+                this.persistenceSliderGroup.style.display = 'block';
+                const currentVal = this.persistenceTime[tab];
+                let matchedIndex = this.persistenceTimeVals.indexOf(currentVal);
+                if (matchedIndex === -1) {
+                    matchedIndex = 3; // Default to 0.8s
+                }
+                this.persistenceTimeSlider.value = matchedIndex;
+                
+                let valStr = `${currentVal}s`;
+                if (currentVal === 0.0) {
+                    valStr = '0s (Off)';
+                } else if (currentVal === Infinity) {
+                    valStr = 'inf';
+                }
+                if (this.persistenceTimeVal) {
+                    this.persistenceTimeVal.textContent = valStr;
+                }
+            } else {
+                this.persistenceSliderGroup.style.display = 'none';
+            }
         }
         
         this.updateMetricsSliderLabel();
@@ -2714,30 +2798,30 @@ class OscilloscopeApp {
         this.renderOSD();
     }
     
-    drawTrace(channelId, vx, vy, vw, vh) {
+    drawTrace(channelId, vx, vy, vw, vh, overrideTimeData = null, overrideVoltageData = null, overrideAlpha = null, overrideViewportStartT = null, overrideScreenDuration = null) {
         // Resolve target arrays and settings
         let timeData, voltageData, color, enabled, isFFT, offsetDiv;
         let chanName;
         
         if (channelId === 1) {
-            timeData = this.timeData1;
-            voltageData = this.voltageData1;
+            timeData = overrideTimeData !== null ? overrideTimeData : this.timeData1;
+            voltageData = overrideVoltageData !== null ? overrideVoltageData : this.voltageData1;
             color = '#00ff66'; // Neon Green
             enabled = this.ch1Enable.checked;
             isFFT = this.fftEnabledCh1;
             offsetDiv = this.verticalOffsetDivCh1;
             chanName = 'CH1';
         } else if (channelId === 2) {
-            timeData = this.timeData2;
-            voltageData = this.voltageData2;
+            timeData = overrideTimeData !== null ? overrideTimeData : this.timeData2;
+            voltageData = overrideVoltageData !== null ? overrideVoltageData : this.voltageData2;
             color = '#00e5ff'; // Neon Blue
             enabled = this.ch2Enable.checked;
             isFFT = this.fftEnabledCh2;
             offsetDiv = this.verticalOffsetDivCh2;
             chanName = 'CH2';
         } else {
-            timeData = this.timeDataMath;
-            voltageData = this.voltageDataMath;
+            timeData = overrideTimeData !== null ? overrideTimeData : this.timeDataMath;
+            voltageData = overrideVoltageData !== null ? overrideVoltageData : this.voltageDataMath;
             color = '#bd00ff'; // Neon Purple
             enabled = this.mathEnable.checked;
             isFFT = this.fftEnabledMath;
@@ -2753,49 +2837,115 @@ class OscilloscopeApp {
         const centerY = vy + vh / 2;
         
         const timebase = this.HORIZ_VALS[this.currentTimebaseIdx];
-        const screenDuration = timebase * 12; // 12 divs total horizontal
+        let screenDuration = timebase * 12; // 12 divs total horizontal
         
         const startT = timeData[0];
         const endT = timeData[timeData.length - 1];
         const totalDuration = endT - startT;
         
         let viewportStartT, viewportEndT;
-        if (this.mode === 'realtime') {
-            viewportEndT = endT;
-            viewportStartT = Math.max(startT, endT - screenDuration);
-        } else {
-            viewportStartT = startT + (this.horizontalPosition * Math.max(0, totalDuration - screenDuration));
+        if (overrideViewportStartT !== null) {
+            viewportStartT = overrideViewportStartT;
+            screenDuration = overrideScreenDuration;
             viewportEndT = viewportStartT + screenDuration;
+        } else {
+            if (this.mode === 'realtime') {
+                viewportEndT = endT;
+                viewportStartT = Math.max(startT, endT - screenDuration);
+            } else {
+                viewportStartT = startT + (this.horizontalPosition * Math.max(0, totalDuration - screenDuration));
+                viewportEndT = viewportStartT + screenDuration;
+            }
         }
         
         // Find visible sample boundaries via Binary Search
         let startIndex = 0;
         let endIndex = timeData.length - 1;
         
-        let low = 0, high = timeData.length - 1;
-        while (low <= high) {
-            const mid = (low + high) >> 1;
-            if (timeData[mid] < viewportStartT) {
-                startIndex = mid;
-                low = mid + 1;
-            } else {
-                high = mid - 1;
+        if (overrideViewportStartT === null) {
+            let low = 0, high = timeData.length - 1;
+            while (low <= high) {
+                const mid = (low + high) >> 1;
+                if (timeData[mid] < viewportStartT) {
+                    startIndex = mid;
+                    low = mid + 1;
+                } else {
+                    high = mid - 1;
+                }
             }
-        }
-        
-        low = 0; high = timeData.length - 1;
-        while (low <= high) {
-            const mid = (low + high) >> 1;
-            if (timeData[mid] <= viewportEndT) {
-                endIndex = mid;
-                low = mid + 1;
-            } else {
-                high = mid - 1;
+            
+            low = 0; high = timeData.length - 1;
+            while (low <= high) {
+                const mid = (low + high) >> 1;
+                if (timeData[mid] <= viewportEndT) {
+                    endIndex = mid;
+                    low = mid + 1;
+                } else {
+                    high = mid - 1;
+                }
             }
         }
         
         const visibleCount = endIndex - startIndex + 1;
         if (visibleCount <= 0) return;
+
+        // Display Persistency logic
+        if (overrideTimeData === null) {
+            const duration = this.getPersistenceDuration(chanName);
+            const isPersistActive = this.persistenceMode[chanName] === 'AUTO' || 
+                                    (this.persistenceMode[chanName] === 'MANUAL' && duration > 0.0);
+                                    
+            if (isPersistActive) {
+                const now = performance.now();
+                if (now - this.lastPersistenceCaptureTime[chanName] >= 100) {
+                    this.lastPersistenceCaptureTime[chanName] = now;
+                    if (visibleCount > 0 && startIndex <= endIndex) {
+                        const snapTimeData = timeData.slice(startIndex, endIndex + 1);
+                        const snapVoltageData = voltageData.slice(startIndex, endIndex + 1);
+                        
+                        this.persistenceHistory[chanName].push({
+                            timeData: snapTimeData,
+                            voltageData: snapVoltageData,
+                            viewportStartT: viewportStartT,
+                            screenDuration: screenDuration,
+                            timestamp: now
+                        });
+                    }
+                }
+                
+                const history = this.persistenceHistory[chanName];
+                // Filter expired entries
+                while (history.length > 0 && (now - history[0].timestamp) > duration * 1000) {
+                    history.shift();
+                }
+                // Cap maximum frames stored
+                const maxHistoryLen = duration === Infinity ? 60 : 150;
+                while (history.length > maxHistoryLen) {
+                    history.shift();
+                }
+                
+                // Redraw past sweeps with progressive fade
+                for (let i = 0; i < history.length - 1; i++) {
+                    const snap = history[i];
+                    let alpha;
+                    if (duration === Infinity) {
+                        alpha = 0.08 + 0.35 * (i / history.length);
+                    } else {
+                        const age = now - snap.timestamp;
+                        const ratio = age / (duration * 1000);
+                        alpha = 0.06 + 0.44 * (1 - Math.min(1.0, Math.max(0.0, ratio)));
+                    }
+                    
+                    this.drawTrace(
+                        channelId, vx, vy, vw, vh,
+                        snap.timeData, snap.voltageData, alpha,
+                        snap.viewportStartT, snap.screenDuration
+                    );
+                }
+            } else {
+                this.persistenceHistory[chanName] = [];
+            }
+        }
         
         // Resolve sampling dt
         const avg_dt = (timeData[endIndex] - timeData[startIndex]) / (endIndex - startIndex);
@@ -2835,6 +2985,9 @@ class OscilloscopeApp {
             
             // Draw FFT magnitude spectrum curve
             this.ctx.save();
+            if (overrideAlpha !== null) {
+                this.ctx.globalAlpha = overrideAlpha;
+            }
             this.ctx.strokeStyle = color;
             this.ctx.lineWidth = 1.8;
             this.ctx.shadowColor = color;
@@ -2857,7 +3010,7 @@ class OscilloscopeApp {
             this.ctx.restore();
             
             // Draw dotted threshold and frequency limit lines if trigger is enabled for this channel and it is the selected active tab
-            if (this.triggerEnabled[chanName] && chanName === this.activeTab) {
+            if (overrideTimeData === null && this.triggerEnabled[chanName] && chanName === this.activeTab) {
                 this.ctx.save();
                 this.ctx.lineWidth = 1.0;
                 this.ctx.setLineDash([3, 3]);
@@ -2935,13 +3088,15 @@ class OscilloscopeApp {
             }
             
             
-            // Render tiny label in viewport for frequency markers
-            this.ctx.fillStyle = color;
-            this.ctx.font = '10px monospace';
-            const lineHeight = 12;
-            const textY = vy + vh - (lineHeight * 2.2) - (channelId === 1 ? 0 : (channelId === 2 ? lineHeight : lineHeight * 2));
-            const freqDiv = maxFreq / 12;
-            this.ctx.fillText(`${chanName} FFT Spectrum: ${this.formatFreq(freqDiv)}/div | Window: ${this.fftWindow}`, vx + 10, textY);
+            if (overrideTimeData === null) {
+                // Render tiny label in viewport for frequency markers
+                this.ctx.fillStyle = color;
+                this.ctx.font = '10px monospace';
+                const lineHeight = 12;
+                const textY = vy + vh - (lineHeight * 2.2) - (channelId === 1 ? 0 : (channelId === 2 ? lineHeight : lineHeight * 2));
+                const freqDiv = maxFreq / 12;
+                this.ctx.fillText(`${chanName} FFT Spectrum: ${this.formatFreq(freqDiv)}/div | Window: ${this.fftWindow}`, vx + 10, textY);
+            }
             
         } else {
             // TIME DOMAIN WAVEFORM PLOT
@@ -2954,6 +3109,9 @@ class OscilloscopeApp {
             };
             
             this.ctx.save();
+            if (overrideAlpha !== null) {
+                this.ctx.globalAlpha = overrideAlpha;
+            }
             this.ctx.strokeStyle = color;
             this.ctx.lineWidth = 1.8;
             this.ctx.shadowColor = color;
@@ -4081,6 +4239,21 @@ class OscilloscopeApp {
         this.layoutSelector.value = p.layoutMode;
         this.modeSelector.value = p.mode;
         
+        // Display Persistency states
+        if (p.persistenceMode) {
+            this.persistenceMode = JSON.parse(JSON.stringify(p.persistenceMode));
+        } else {
+            this.persistenceMode = { 'CH1': 'AUTO', 'CH2': 'AUTO', 'MATH': 'AUTO' };
+        }
+        if (p.persistenceTime) {
+            this.persistenceTime = JSON.parse(JSON.stringify(p.persistenceTime));
+        } else {
+            this.persistenceTime = { 'CH1': 0.8, 'CH2': 0.8, 'MATH': 0.8 };
+        }
+        this.persistenceHistory['CH1'] = [];
+        this.persistenceHistory['CH2'] = [];
+        this.persistenceHistory['MATH'] = [];
+        
         // Vertical states
         this.currentVoltbaseIdxCh1 = p.currentVoltbaseIdxCh1;
         this.currentVoltbaseIdxCh2 = p.currentVoltbaseIdxCh2;
@@ -4198,8 +4371,8 @@ class OscilloscopeApp {
             alert("Please enter a valid profile name.");
             return;
         }
-        
-        const profilePayload = {
+
+        this.profiles[name] = {
             mode: this.mode,
             activeTab: this.activeTab,
             ch1Enable: this.ch1Enable.checked,
@@ -4211,7 +4384,10 @@ class OscilloscopeApp {
             horizontalPosition: this.horizontalPosition,
             playbackSpeed: this.playbackSpeed,
             playbackSpeedSliderValue: parseInt(this.playbackSpeedSlider.value, 10),
-            
+
+            persistenceMode: this.persistenceMode,
+            persistenceTime: this.persistenceTime,
+
             currentVoltbaseIdxCh1: this.currentVoltbaseIdxCh1,
             currentVoltbaseIdxCh2: this.currentVoltbaseIdxCh2,
             currentVoltbaseIdxMath: this.currentVoltbaseIdxMath,
@@ -4219,17 +4395,17 @@ class OscilloscopeApp {
             verticalOffsetDivCh2: this.verticalOffsetDivCh2,
             verticalOffsetDivMath: this.verticalOffsetDivMath,
             mathOperation: this.mathOperation,
-            
+
             fftEnabledCh1: this.fftEnabledCh1,
             fftEnabledCh2: this.fftEnabledCh2,
             fftEnabledMath: this.fftEnabledMath,
             fftWindow: this.fftWindow,
             fftVerticalBase: this.fftVerticalBase,
-            
+
             osdEnabledCh1: this.osdEnabledCh1,
             osdEnabledCh2: this.osdEnabledCh2,
             osdEnabledMath: this.osdEnabledMath,
-            
+
             triggerEnabled: this.triggerEnabled,
             triggerActionVal: this.triggerActionVal,
             triggerLowDiv: this.triggerLowDiv,
@@ -4241,7 +4417,7 @@ class OscilloscopeApp {
             triggerFreqLowHz: this.triggerFreqLowHz,
             triggerFreqHighHz: this.triggerFreqHighHz,
             triggerFFTMatchLogic: this.triggerFFTMatchLogic,
-            
+
             cursorsEnabled: this.cursorsEnabled,
             cursorChEnabled: this.cursorChEnabled,
             cursorTrackingMode: this.cursorTrackingMode,
@@ -4257,7 +4433,7 @@ class OscilloscopeApp {
                 posValue: this.cursor2.posValue,
                 activeCh: this.cursor2.activeCh
             } : null,
-            
+
             metricsEnabledCh1: this.metricsEnabledCh1,
             metricsEnabledCh2: this.metricsEnabledCh2,
             metricsEnabledMath: this.metricsEnabledMath,
@@ -4265,8 +4441,6 @@ class OscilloscopeApp {
             metricsAutoResetEnabled: this.metricsAutoResetEnabled,
             metricsAutoResetMult: this.metricsAutoResetMult
         };
-        
-        this.profiles[name] = profilePayload;
         
         try {
             localStorage.setItem('hantek_dso_profiles', JSON.stringify(this.profiles));
