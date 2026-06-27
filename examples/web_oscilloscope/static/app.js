@@ -3356,8 +3356,10 @@ class OscilloscopeApp {
         this.canvas.addEventListener('pointermove', (e) => {
             if (!this.cursorsEnabled) return;
             const rect = this.canvas.getBoundingClientRect();
-            const cx = Math.max(0, Math.min(this.getWaveWidth(), e.clientX - rect.left));
-            const cy = Math.max(0, Math.min(this.canvas.height, e.clientY - rect.top));
+            const scaleX = rect.width > 0 ? (this.canvas.width / rect.width) : 1;
+            const scaleY = rect.height > 0 ? (this.canvas.height / rect.height) : 1;
+            const cx = Math.max(0, Math.min(this.getWaveWidth(), (e.clientX - rect.left) * scaleX));
+            const cy = Math.max(0, Math.min(this.canvas.height, (e.clientY - rect.top) * scaleY));
             
             // Update temporary cursor following mouse if < 2 locked cursors
             if (this.cursor1 === null || this.cursor2 === null) {
@@ -3378,8 +3380,10 @@ class OscilloscopeApp {
         this.canvas.addEventListener('pointerdown', (e) => {
             if (!this.cursorsEnabled || e.button !== 0) return;
             const rect = this.canvas.getBoundingClientRect();
-            const cx = Math.max(0, Math.min(this.getWaveWidth(), e.clientX - rect.left));
-            const cy = Math.max(0, Math.min(this.canvas.height, e.clientY - rect.top));
+            const scaleX = rect.width > 0 ? (this.canvas.width / rect.width) : 1;
+            const scaleY = rect.height > 0 ? (this.canvas.height / rect.height) : 1;
+            const cx = Math.max(0, Math.min(this.getWaveWidth(), (e.clientX - rect.left) * scaleX));
+            const cy = Math.max(0, Math.min(this.canvas.height, (e.clientY - rect.top) * scaleY));
             
             if (this.cursor1 === null) {
                 this.cursor1 = {
