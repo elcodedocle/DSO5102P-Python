@@ -2104,13 +2104,36 @@ class OscilloscopeApp {
         });
     }
     
-    autoCalibrate() {
+    async autoCalibrate() {
         this.resetTriggerState();
         if (this.mode === 'realtime') {
             this.verticalOffsetDivCh1 = 0.0;
             this.verticalOffsetDivCh2 = 0.0;
             this.verticalOffsetDivMath = 0.0;
             this.horizontalPosition = 0.0;
+            
+            // Pre-fetch active settings to synchronize the UI timebase and voltbase immediately
+            try {
+                const s1Res = await fetch('/api/settings?channel=0');
+                const s1 = await s1Res.json();
+                if (s1 && !s1.error && s1.timebase) {
+                    this.timebaseHeaderCh1 = s1.timebase;
+                    this.voltbaseHeaderCh1 = s1.voltbase;
+                    this.syncTimebase(s1.timebase * 1e-12);
+                    this.syncVoltbase('CH1', s1.voltbase * 1e-6);
+                }
+                
+                const s2Res = await fetch('/api/settings?channel=1');
+                const s2 = await s2Res.json();
+                if (s2 && !s2.error && s2.timebase) {
+                    this.timebaseHeaderCh2 = s2.timebase;
+                    this.voltbaseHeaderCh2 = s2.voltbase;
+                    this.syncTimebase(s2.timebase * 1e-12);
+                    this.syncVoltbase('CH2', s2.voltbase * 1e-6);
+                }
+            } catch (err) {
+                console.error("Failed to pre-fetch settings on autocalibrate:", err);
+            }
         } else {
             this.verticalOffsetDivCh1 = 0.0;
             this.verticalOffsetDivCh2 = 0.0;
