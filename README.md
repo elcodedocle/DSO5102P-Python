@@ -78,3 +78,42 @@ nice 30MHz square clock signal).
 ![screenshot_during_web_oscilloscope.png](support/img/screenshot_during_web_oscilloscope.png)
 
 ![web_oscilloscope_during_screenshot.png](support/img/web_oscilloscope_during_screenshot.png)
+
+### Component Relationship Diagram
+
+```mermaid
+graph TD
+    classDef main fill:#2b303c,stroke:#4a5160,stroke-width:2px,color:#fff;
+    classDef module fill:#1e222b,stroke:#3b404d,stroke-width:1px,color:#cfd2d9;
+    classDef util fill:#151821,stroke:#2d3139,stroke-width:1px,color:#a9abb3;
+
+    App[OscilloscopeApp<br/>static/js/app.js]:::main
+
+    subgraph Subsystems
+        DM[DataManager<br/>modules/data_manager.js]:::module
+        TR[Triggers<br/>modules/triggers.js]:::module
+        CR[Cursors<br/>modules/cursors.js]:::module
+        MT[Metrics<br/>modules/metrics.js]:::module
+        PM[ProfileManager<br/>modules/profiles.js]:::module
+        RN[Renderer<br/>modules/renderer.js]:::module
+    end
+
+    subgraph Stateless Utilities
+        DSP[DSP Math Utilities<br/>modules/dsp.js]:::util
+        CONST[Constants & Scales<br/>modules/constants.js]:::util
+    end
+
+    App --> DM
+    App --> TR
+    App --> CR
+    App --> MT
+    App --> PM
+    App --> RN
+
+    DM -.-> DSP
+    TR -.-> DSP
+    CR -.-> RN
+    MT -.-> RN
+    RN -.-> CONST
+    App -.-> CONST
+```
