@@ -92,6 +92,7 @@ class OscilloscopeApp {
         this.websocketCh1 = null;
         this.websocketCh2 = null;
         this.playbackPlaying = false;
+        this.playbackFileHasGaps = false;
         this.playbackFrameId = null;
         this.displayFrozen = false;
         this.playbackSpeed = 1.0;
@@ -770,6 +771,27 @@ class OscilloscopeApp {
             this.voltageData2 = voltageData;
         }
         
+        let hasGaps = false;
+        if (timeData.length > 10) {
+            // Calculate internal dt_avg of first 10 contiguous samples
+            let dt_sum = 0;
+            for (let i = 1; i <= 10; i++) {
+                dt_sum += (timeData[i] - timeData[i - 1]);
+            }
+            const dt_avg = dt_sum / 10;
+            this.playbackFileDtAvg = dt_avg;
+            
+            // Check for any gap that is significantly larger than dt_avg (e.g., > 50 * dt_avg or > 50ms)
+            const gap_thresh = Math.max(0.05, 50 * dt_avg); 
+            for (let i = 1; i < timeData.length; i++) {
+                if (timeData[i] - timeData[i - 1] > gap_thresh) {
+                    hasGaps = true;
+                    break;
+                }
+            }
+        }
+        this.playbackFileHasGaps = hasGaps;
+        
         this.capturedCount.textContent = Math.max(this.timeData1.length, this.timeData2.length).toLocaleString();
         this.updateSlidersAndReadouts();
         this.drawOscilloscope();
@@ -1084,7 +1106,7 @@ class OscilloscopeApp {
     appendLiveCSV(csvChunk, channel) {
         // Strip out and buffer recording pieces in pure time domain
         if (this.isRecording) {
-            const stripped = csvChunk.replace(/^\s*#.*$/gm, '').trim();
+            const stripped = csvChunk.replace(/^\s*,?#.*\r?\n?/gm, '').trim();
             if (stripped) {
                 const chunkCount = (stripped.match(/\n/g) || []).length + 1;
                 if (channel === 1) {
@@ -1361,6 +1383,52 @@ class OscilloscopeApp {
         this.speedValText.textContent = `${this.playbackSpeed.toFixed(this.playbackSpeed < 0.01 ? 3 : (this.playbackSpeed < 0.1 ? 2 : this.playbackSpeed < 1 ? 1 : 0))}x`;
     }
     
+    getPlaybackViewport(timeData, targetT, screenDuration) {
+        if (!timeData || timeData.length === 0) {
+            return { viewportStartT: targetT, viewportEndT: targetT + screenDuration };
+        }
+        
+        // Find last sample index <= targetT using binary search
+        let low = 0, high = timeData.length - 1;
+        let last_idx = 0;
+        while (low <= high) {
+            const mid = (low + high) >> 1;
+            if (timeData[mid] <= targetT) {
+                last_idx = mid;
+                low = mid + 1;
+            } else {
+                high = mid - 1;
+            }
+        }
+        
+        // Use class-level dt_avg computed during file load
+        const local_dt = this.playbackFileDtAvg || 1e-5;
+        const gap_threshold = Math.max(0.005, 5 * local_dt);
+        
+        // Find the end of the chunk containing timeData[last_idx]
+        let chunk_end_idx = last_idx;
+        while (chunk_end_idx < timeData.length - 1) {
+            const next_dt = timeData[chunk_end_idx + 1] - timeData[chunk_end_idx];
+            if (next_dt > gap_threshold) {
+                break; // gap detected!
+            }
+            chunk_end_idx++;
+        }
+        const T_chunk_end = timeData[chunk_end_idx];
+        
+        if (this.playbackFileHasGaps) {
+            return {
+                viewportStartT: T_chunk_end - screenDuration,
+                viewportEndT: T_chunk_end
+            };
+        } else {
+            return {
+                viewportStartT: targetT,
+                viewportEndT: targetT + screenDuration
+            };
+        }
+    }
+    
     playbackLoop() {
         if (!this.playbackPlaying) return;
         
@@ -1394,9 +1462,9 @@ class OscilloscopeApp {
         this.drawOscilloscope();
         
         // Evaluate per-channel playback triggers
-        const viewportStartT = startT + (this.horizontalPosition * Math.max(0, totalDuration - screenDuration));
-        const viewportEndT = viewportStartT + screenDuration;
-        this.evaluatePlaybackTriggers(viewportStartT, viewportEndT);
+        const targetT = startT + (this.horizontalPosition * Math.max(0, totalDuration - screenDuration));
+        const vp = this.getPlaybackViewport(mainTimeData, targetT, screenDuration);
+        this.evaluatePlaybackTriggers(vp.viewportStartT, vp.viewportEndT);
         
         if (this.playbackPlaying) {
             this.playbackFrameId = requestAnimationFrame(() => this.playbackLoop());
@@ -1482,8 +1550,10 @@ class OscilloscopeApp {
                 viewportEndT = endT;
                 viewportStartT = Math.max(startT, endT - screenDuration);
             } else {
-                viewportStartT = startT + (this.horizontalPosition * Math.max(0, totalDuration - screenDuration));
-                viewportEndT = viewportStartT + screenDuration;
+                const targetT = startT + (this.horizontalPosition * Math.max(0, totalDuration - screenDuration));
+                const vp = this.getPlaybackViewport(timeArray, targetT, screenDuration);
+                viewportStartT = vp.viewportStartT;
+                viewportEndT = vp.viewportEndT;
             }
         }
 
@@ -1862,7 +1932,8 @@ class OscilloscopeApp {
             if (this.mode === 'realtime') {
                 viewportStartT = Math.max(startT, endT - screenDuration);
             } else {
-                viewportStartT = startT + (this.horizontalPosition * Math.max(0, totalDuration - screenDuration));
+                const targetT = startT + (this.horizontalPosition * Math.max(0, totalDuration - screenDuration));
+                viewportStartT = this.getPlaybackViewport(timeData, targetT, screenDuration).viewportStartT;
             }
             
             const tAbsolute = viewportStartT + xVal + (screenDuration / 2);
@@ -2010,8 +2081,10 @@ class OscilloscopeApp {
                 viewportEndT = endT;
                 viewportStartT = Math.max(startT, endT - screenDuration);
             } else {
-                viewportStartT = startT + (this.horizontalPosition * Math.max(0, totalDuration - screenDuration));
-                viewportEndT = viewportStartT + screenDuration;
+                const targetT = startT + (this.horizontalPosition * Math.max(0, totalDuration - screenDuration));
+                const vp = this.getPlaybackViewport(arr, targetT, screenDuration);
+                viewportStartT = vp.viewportStartT;
+                viewportEndT = vp.viewportEndT;
             }
             
             let startIndex = 0;
@@ -2874,8 +2947,10 @@ class OscilloscopeApp {
                 viewportEndT = endT;
                 viewportStartT = Math.max(startT, endT - screenDuration);
             } else {
-                viewportStartT = startT + (this.horizontalPosition * Math.max(0, totalDuration - screenDuration));
-                viewportEndT = viewportStartT + screenDuration;
+                const targetT = startT + (this.horizontalPosition * Math.max(0, totalDuration - screenDuration));
+                const vp = this.getPlaybackViewport(timeData, targetT, screenDuration);
+                viewportStartT = vp.viewportStartT;
+                viewportEndT = vp.viewportEndT;
             }
         }
         
@@ -3803,13 +3878,17 @@ class OscilloscopeApp {
         const startT = mainTimeData[0];
         const endT = mainTimeData[mainTimeData.length - 1];
         const totalDuration = endT - startT;
-        let viewportStartT;
+        let viewportStartT, viewportEndT;
         if (this.mode === 'realtime') {
             viewportStartT = Math.max(startT, endT - screenDuration);
+            viewportEndT = viewportStartT + screenDuration;
         } else {
-            viewportStartT = startT + (this.horizontalPosition * Math.max(0, totalDuration - screenDuration));
+            const targetT = startT + (this.horizontalPosition * Math.max(0, totalDuration - screenDuration));
+            const vp = this.getPlaybackViewport(mainTimeData, targetT, screenDuration);
+            viewportStartT = vp.viewportStartT;
+            viewportEndT = vp.viewportEndT;
         }
-        return { startT: viewportStartT, endT: viewportStartT + screenDuration };
+        return { startT: viewportStartT, endT: viewportEndT };
     }
 
     getViewportSampleBounds(timeData, startT, endT) {
